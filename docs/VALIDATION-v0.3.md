@@ -1,30 +1,44 @@
 # Acadia 0.3.0 validation record
 
-This record distinguishes completed local checks from pending release-platform checks. Initial results were recorded on **September 29, 2026**, during preparation of the public 0.3.0 release. Consult the tagged release and its workflow results for the exact published revision and assets.
+Validated on **September 29, 2026**. The release tag `v0.3.0` identifies commit `96ca97988ddadf1abadfadbfdcca197cacf91c5f`. This record distinguishes automated native execution, installer checks, and remaining physical-hardware work.
 
-The audience-window authorization fix also passed a dedicated native regression covering historical citation navigation, blocked private sources and newer versions, private metadata, attachment access, and immediate access revocation.
+## Verified source and release builds
 
-## Completed locally
+[Source CI](https://github.com/byrneDev/Acadia/actions/runs/36582123207) passed on Ubuntu 24.04 x64, macOS 15 Apple Silicon, and Windows Server 2025 x64. Each platform passed type checking, the production build, **117 unit/research tests**, and **15 native Electron scenarios**.
 
-The release-preparation source was checked on **Apple Silicon macOS**:
+The [tagged release workflow](https://github.com/byrneDev/Acadia/actions/runs/36582461163) independently built the native packages from that exact tag. Every platform again passed the 117 unit/research tests and 15 native scenarios against its packaged application:
 
-- TypeScript validation and the production Electron build passed.
-- **117 unit/integration tests passed**, covering existing board/storage behavior and research validation, extraction, privacy, citation handling, and report workflows.
-- **15 native Electron scenarios passed** against the locally built application, using disposable profiles rather than the researcher's live workspace.
-- Fresh Collector and Releaser screenshots were captured from fictional demo data with the approved branding and visually inspected for the public documentation.
+| Platform | Distribution | Native package validation |
+| --- | --- | --- |
+| [Ubuntu 24.04 x64](https://github.com/byrneDev/Acadia/actions/runs/36582461163/job/109453996087) | `Acadia-0.3.0-linux-x64.deb` | Installed with `apt`; verified desktop integration and the installed AppArmor profile; all 15 scenarios passed against `/opt/Acadia/acadia` under D-Bus/Xvfb with the Electron sandbox enabled. |
+| Ubuntu 24.04 x64 | `Acadia-0.3.0-linux-x64.AppImage` | Verified x64 ELF architecture, successful extraction, and a desktop launcher that preserves the sandbox. AppImage GUI/FUSE launch was not separately exercised. |
+| [macOS 15 arm64](https://github.com/byrneDev/Acadia/actions/runs/36582461163/job/109453995554) | `Acadia-0.3.0-macOS-arm64.zip` | All 15 scenarios passed against the packaged `Acadia.app`; archived with `ditto` to preserve bundle permissions. |
+| [Windows Server 2025 x64](https://github.com/byrneDev/Acadia/actions/runs/36582461163/job/109453995418) | `Acadia-0.3.0-Windows-x64.exe` | NSIS installer built; all 15 scenarios passed against the packaged executable in `win-unpacked`. Interactive NSIS installation and upgrade were not separately exercised. |
 
-The native scenarios exercise board editing and persistence, document imports and originals, portable project recovery, source/evidence/task workflows, historical citations, extraction/OCR, report tables and real exports, proposed section revisions, source-only investigations, released-window behavior, and clear report-generation failure handling. These checks exercise the current implementation; they do not establish research accuracy for every model or subject.
+Each build stages SHA-256 hashes. The release workflow requires all platform jobs to pass, verifies the complete distribution against those hashes, and publishes the combined `SHA256SUMS.txt` alongside the four downloads. Consult the [release page](https://github.com/byrneDev/Acadia/releases/tag/v0.3.0) and workflow for publication status and the final files. GitHub retains detailed test artifacts for a limited time; the run history and this record identify the checked revision.
 
-## Release-platform checks still pending in this initial record
+## What the checks cover
 
-The configured **CI** and **Release** workflows target Ubuntu 24.04 x64, Apple Silicon macOS, and Windows x64. At the time of this initial record, the new three-platform GitHub runs had not completed. No native Ubuntu or Windows success is claimed here.
+Tests use disposable profiles and fictional research. They cover board editing and persistence, document imports and originals, portable project recovery, source/evidence/task workflows, historical citations, extraction/OCR, report tables and real DOCX/PDF/Markdown exports, proposed section revisions, source-only investigations, released-window behavior, simulated touch, and report-generation failure handling.
 
-Before recording a release package as validated, add the workflow/run URL, tested source revision, runner/operating system, architecture, package filename, and the checks that passed. Distinguish a packaged executable test from a `.deb` installation, an AppImage launch, or an NSIS installation. Record failed or skipped checks and any workaround instead of treating an artifact upload as runtime validation.
+The fixed investigation fixtures exercise evidence beyond the old card/page cutoffs, contradictory evidence, duplicate handling, missing information, and exact passage references. These checks test implementation behavior; they do not establish research accuracy for every model or subject.
 
-## Earlier evidence and remaining limits
+The new audience-window regression verifies that only released historical citation passages can be read. Private sources, newer versions, uncited passages, draft/project metadata, and original attachments remain inaccessible from the audience window; revoking the release immediately removes access. The Collector's original-file access and citation navigation remain usable.
 
-The [0.2 validation record](VALIDATION-v0.2.md) includes packaged macOS, OCR, long-document, export-layout, and migration/recovery checks from that release. The [local AI guide](LOCAL-AI.md) records a live Ollama generation and citation-navigation check performed for 0.2.2. Those results are historical evidence, not a replacement for checking new release artifacts.
+Cross-platform runs also found and fixed a canvas lifecycle issue that could discard card measurements and leave a blank board after closing item details. The regression now checks card visibility before drawing a connection. Three local repeats and the final native platform suites passed. Database-heavy Windows acceptance cases have explicit 30-second deadlines while retaining their assertions.
 
-Physical two-monitor arrangements, physical touchscreens, mixed-DPI displays, distribution-specific Linux desktop behavior, and all file/codec combinations are not established by the automated suite. Headless or virtual-display tests are not physical-display tests. Current packages are unsigned and the macOS app is not notarized.
+## Additional local checks
 
-Acadia remains an early-access 0.x application. Citation validation verifies saved references and checks some literal quotations; automatic quotation detection is not exhaustive and it does not prove that a claim follows from its evidence. Test conclusions and OCR output against the source material before relying on a report.
+- Production build and TypeScript validation passed on Apple Silicon macOS.
+- The local 117-test unit/research suite and 15-scenario desktop suite passed during release preparation; the canvas correction additionally passed three targeted native repeats.
+- Approved-brand Collector and Releaser screenshots were captured from fictional demo data and visually inspected.
+- The public source archive was checked against Git-tracked files, excluding profiles, credentials, generated application output, and private research.
+- Dependency audit reported no known vulnerabilities at preparation time. Bundled dependency/license notices were reviewed and regenerated, including native Linux canvas, OCR data, PDF codecs, and fonts.
+
+## Remaining limits
+
+Physical touchscreens, two physical displays, mixed-DPI arrangements, projectors, Linux desktop/keyring variations, interactive Windows installation/upgrade, and normal AppImage launch remain manual validation work. Windows Server CI is not a claim of testing every Windows 10/11 configuration. Headless or virtual-display tests are not physical-display tests. Current packages are unsigned and the macOS app is not notarized.
+
+The [0.2 validation record](VALIDATION-v0.2.md) and [local AI guide](LOCAL-AI.md) contain historical checks, including live Ollama generation and citation navigation for 0.2.2. The public-release suites use deterministic fixtures and do not repeat that live-model evaluation.
+
+Acadia remains an early-access 0.x application. Citation validation checks saved references and detected literal quotations; quotation detection is not exhaustive, and a valid reference does not prove that a claim follows from its evidence. Review OCR and conclusions against the original sources.
