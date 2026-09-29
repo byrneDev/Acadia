@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.png binary
+*.pdf binary
+*.acadia binary
+*.icns binary
+*.ico binary
+# Preserve upstream license text, including its original whitespace.
+docs/THIRD-PARTY-NOTICES.txt -whitespace
+resources/licenses/* -whitespace
+tests/fixtures/LICENSE_LIBERATION -whitespace

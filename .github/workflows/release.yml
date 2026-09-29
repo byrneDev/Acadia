@@ -1,0 +1,245 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after all checks pass (must run against an existing version tag)
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: "true"
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+jobs:
+  metadata:
+    name: Validate release version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Require the tag to match package.json
+        id: version
+        env:
+          REQUEST_PUBLISH: ${{ github.event_name == 'push' || inputs.publish == true }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const {version} = require('./package.json');
+          const lock = require('./package-lock.json');
+          if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('Invalid release version.');
+          if (lock.version !== version || lock.packages[''].version !== version) throw new Error('Package and lockfile versions differ.');
+          const tag = `v${version}`;
+          const publish = process.env.REQUEST_PUBLISH === 'true';
+          if ((publish || process.env.GITHUB_REF_TYPE === 'tag') && process.env.GITHUB_REF !== `refs/tags/${tag}`) {
+            throw new Error(`Select or push the existing ${tag} tag. Branch dispatches only build artifacts.`);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ntag=${tag}\npublish=${publish}\n`);
+          NODE
+
+  package:
+    name: Package and test (${{ matrix.platform }})
+    needs: metadata
+    timeout-minutes: 45
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+            script: package:linux
+            executable: linux-unpacked/acadia
+          - os: macos-15
+            platform: macos-arm64
+            script: package:mac
+            executable: mac-arm64/Acadia.app/Contents/MacOS/Acadia
+          - os: windows-2025
+            platform: windows-x64
+            script: package:win
+            executable: win-unpacked/Acadia.exe
+    env:
+      ACADIA_RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+      ACADIA_RELEASE_PLATFORM: ${{ matrix.platform }}
+      ACADIA_PACKAGE_SCRIPT: ${{ matrix.script }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Prepare Ubuntu desktop test environment
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/setup-linux-ci.sh
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Check types
+        run: npm run typecheck
+      - name: Run unit and research acceptance tests
+        run: npm test
+      - name: Build native package without publishing
+        run: |
+          if [[ "$ACADIA_PACKAGE_SCRIPT" == "package:linux" ]]; then
+            npm run "$ACADIA_PACKAGE_SCRIPT"
+          else
+            npm run "$ACADIA_PACKAGE_SCRIPT" -- --publish never
+          fi
+      - name: Install Ubuntu package and its sandbox profile
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install --yes "./release/v$ACADIA_RELEASE_VERSION/Acadia-$ACADIA_RELEASE_VERSION-linux-x64.deb"
+          test -x /opt/Acadia/acadia
+          test -f /usr/share/applications/acadia.desktop
+          if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
+            test -f /etc/apparmor.d/acadia
+          fi
+      - name: Test installed Electron application on Ubuntu
+        if: runner.os == 'Linux'
+        env:
+          ACADIA_TEST_EXECUTABLE: /opt/Acadia/acadia
+        run: dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e
+      - name: Test packaged Electron application on macOS or Windows
+        if: runner.os != 'Linux'
+        env:
+          ACADIA_TEST_EXECUTABLE: ${{ github.workspace }}/release/v${{ needs.metadata.outputs.version }}/${{ matrix.executable }}
+        run: npm run test:e2e
+      - name: Archive macOS application with executable permissions
+        if: runner.os == 'macOS'
+        run: |
+          release_dir="release/v$ACADIA_RELEASE_VERSION"
+          ditto -c -k --sequesterRsrc --keepParent "$release_dir/mac-arm64/Acadia.app" "$release_dir/Acadia-$ACADIA_RELEASE_VERSION-macOS-arm64.zip"
+      - name: Validate packages and stage checksummed assets
+        run: node .github/scripts/release-artifacts.cjs stage
+      - name: Save release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets-${{ matrix.platform }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Save packaged application test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-tests-${{ matrix.platform }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  verify:
+    name: Verify all release assets
+    needs: [metadata, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ACADIA_RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-assets-*
+          path: release-assets/
+          merge-multiple: true
+      - name: Verify platform manifests and create combined checksums
+        run: node .github/scripts/release-artifacts.cjs verify
+      - name: Save verified distribution
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-distribution
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  publish:
+    name: Publish verified GitHub release
+    needs: [metadata, verify]
+    if: needs.metadata.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-distribution
+          path: release-assets/
+      - name: Verify downloaded assets before publication
+        working-directory: release-assets
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Publish a new release from the existing tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          cat > release-notes.md <<'NOTES'
+          Acadia brings the Collector research canvas and Releaser report workspace to Ubuntu, macOS, and Windows.
+
+          ### Included in this release
+
+          - A local project library with connected research boards, immutable source versions, searchable passages, evidence assessments, and gap-linked tasks.
+          - PDF, Word, text, and public web capture; bundled English OCR for scanned material.
+          - Optional local or explicitly configured cloud AI, passage citations, and separately approved Brave discovery.
+          - Editable decision briefs, hypotheses, research plans, whitepapers, gap analyses, and needs analyses with DOCX, PDF, and Markdown exports.
+          - Saved report revisions and an isolated second display that follows the explicitly released report.
+          - The approved Acadia branding, MIT license, contributor documentation, and reproducible native release checks.
+
+          ### Downloads and installation
+
+          Ubuntu 24.04 x64: use the `.deb` installer, or the AppImage where the desktop environment supports its sandbox requirements. macOS Apple Silicon: unzip `Acadia.app`. Windows x64: run the `.exe` installer.
+
+          Start with the [quick-start guide](https://github.com/byrneDev/Acadia/blob/main/docs/QUICK-START.md), [Ubuntu guide](https://github.com/byrneDev/Acadia/blob/main/docs/LINUX.md), and [local AI setup](https://github.com/byrneDev/Acadia/blob/main/docs/LOCAL-AI.md). A fictional investigation is bundled for exploration.
+
+          ### Validation and limits
+
+          Publication requires type checks, the research/unit suite, and native desktop scenarios against each packaged application on Ubuntu, macOS, and Windows. The workflow verifies the complete distribution and its checksums before uploading.
+
+          Packages are unsigned; the macOS application is not notarized. See the repository's installation and validation guides. Automated native scenarios include separate output windows and simulated touch; physical multi-monitor and touchscreen checks remain separate.
+
+          Acadia remains an early-access 0.x application. Review OCR and AI findings against the sources, and keep project backups. Verify downloads against SHA256SUMS.txt. Local AI models and credentials are not included.
+          NOTES
+          shopt -s nullglob
+          assets=(release-assets/*.deb release-assets/*.AppImage release-assets/*.zip release-assets/*.exe release-assets/SHA256SUMS.txt)
+          if [[ ${#assets[@]} -ne 5 ]]; then
+            echo "Expected four native downloads and one combined checksum file." >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --title "Acadia $RELEASE_VERSION" --generate-notes --notes-file release-notes.md

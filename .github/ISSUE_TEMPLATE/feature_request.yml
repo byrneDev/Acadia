@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an improvement to research, analysis, or report production.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Research problem
+      description: Describe the task you are trying to complete and what currently gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe how the improvement would help a researcher.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: success
+    attributes:
+      label: What would demonstrate success?
+      description: A short example or acceptance criterion is helpful. Use fictional research instead of private material.

@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible problem with Acadia.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use a small fictional example where possible. Do not include API keys, private research, or personal documents. Report security vulnerabilities through the repository's security reporting instructions.
+  - type: input
+    id: version
+    attributes:
+      label: Acadia version
+      placeholder: "0.3.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Ubuntu Linux x64 (.deb)
+        - Linux x64 (AppImage)
+        - macOS Apple Silicon
+        - Windows x64
+        - Development build or another platform
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system version
+      placeholder: Ubuntu 24.04, macOS 15, or Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the relevant view, import format, or report action.
+      placeholder: |
+        1. Open a new project...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include error text or a screenshot after removing private information.
+    validations:
+      required: true
+  - type: input
+    id: ai-provider
+    attributes:
+      label: AI provider and model, if relevant
+      description: Never include credentials or API keys.
+      placeholder: Ollama / qwen3.5:9b, or no AI provider
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Mention repeatability, project migration, multiple displays, or touch input if relevant.

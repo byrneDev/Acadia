@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: "true"
+
+jobs:
+  checks:
+    name: Checks (${{ matrix.platform }})
+    timeout-minutes: 35
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: macos-15
+            platform: macos-arm64
+          - os: windows-2025
+            platform: windows-x64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Prepare Ubuntu desktop test environment
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/setup-linux-ci.sh
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Check types
+        run: npm run typecheck
+      - name: Run unit and research acceptance tests
+        run: npm test
+      - name: Build application
+        run: npm run build
+      - name: Run native Electron scenarios on Ubuntu
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e
+      - name: Run native Electron scenarios on macOS or Windows
+        if: runner.os != 'Linux'
+        run: npm run test:e2e
+      - name: Save native test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-tests-${{ matrix.platform }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
