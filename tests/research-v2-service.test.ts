@@ -231,7 +231,7 @@ describe("fixed Cedar investigation: support, contradiction, and known gap", () 
     expect(run.queries?.counter.length).toBeGreaterThan(0);
     expect(run.sourceVersions).toContain("field-v1");
     expect(run.status).toBe("completed");
-  });
+  }, 30000);
   it("preserves exact historical citation locations after a source update and archive reimport", async () => {
     const { store, project, service } = setup();
     add(

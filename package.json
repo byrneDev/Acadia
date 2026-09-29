@@ -108,7 +108,7 @@
           ]
         }
       ],
-      "artifactName": "Acadia-${version}-linux-${arch}.${ext}",
+      "artifactName": "Acadia-${version}-linux-x64.${ext}",
       "executableName": "acadia",
       "category": "Office",
       "executableArgs": [],
