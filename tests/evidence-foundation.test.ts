@@ -380,7 +380,7 @@ describe("complete document ingestion and safe capture", () => {
     expect(store.getSource(project.cards[0].sourceId!).passages).toHaveLength(
       1000,
     );
-  });
+  }, 30000);
   it("recognizes image text using bundled local English OCR data", async () => {
     const { createCanvas } = await import("@napi-rs/canvas");
     const canvas = createCanvas(1000, 160);

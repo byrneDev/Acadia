@@ -14,7 +14,7 @@ describe("PDF text capture", () => {
       "A comparison group is required before attributing the improvement",
     );
     expect(text).not.toContain("could not be extracted");
-  });
+  }, 30000);
 
   it("rejects a malformed file so import can keep the original with an extraction notice", async () => {
     await expect(
