@@ -12,6 +12,7 @@ Acadia follows a 0.x early-access release series. Entries describe application c
 
 ### Fixed
 
+- Preserved canvas card measurements during selection and research updates, preventing an intermittent blank board after closing item details.
 - Restricted audience-window APIs to the selected released revision and its historical citation passages. Unreleased source versions, uncited text, private project metadata, and original attachments stay in the Collector. A native regression covers the API, citation reader, attachment protocol, and release revocation.
 
 This release establishes a public distribution baseline. It does not imply a completed independent security review or validation of every target device. Consult the release assets and validation notes for the builds actually provided.

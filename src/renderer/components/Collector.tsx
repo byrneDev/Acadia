@@ -70,41 +70,55 @@ function Board(props: Props) {
   const activeProject = useRef(project.id);
   const wrapper = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    setNodes([
-      ...(project.groups || []).flatMap((group) => {
-        const cards = project.cards.filter((c) => group.cardIds.includes(c.id));
-        if (!cards.length) return [];
-        const x = Math.min(...cards.map((c) => c.x)) - 30,
-          y = Math.min(...cards.map((c) => c.y)) - 65;
-        return [
-          {
-            id: `area-${group.id}`,
-            type: "area",
-            position: { x, y },
-            data: { title: group.title },
-            draggable: false,
-            selectable: false,
-            connectable: false,
-            zIndex: -1,
-            style: {
-              width: Math.max(...cards.map((c) => c.x)) - x + 310,
-              height: Math.max(...cards.map((c) => c.y)) - y + 260,
-              background: "#b8ff5a06",
-              border: `1px dashed ${group.color}`,
-              borderRadius: 12,
-              pointerEvents: "none" as const,
+    setNodes((currentNodes) => {
+      const existingNodes = new Map(
+        currentNodes.map((node) => [node.id, node]),
+      );
+      const nextNodes: Node[] = [
+        ...(project.groups || []).flatMap((group) => {
+          const cards = project.cards.filter((c) =>
+            group.cardIds.includes(c.id),
+          );
+          if (!cards.length) return [];
+          const x = Math.min(...cards.map((c) => c.x)) - 30,
+            y = Math.min(...cards.map((c) => c.y)) - 65;
+          return [
+            {
+              id: `area-${group.id}`,
+              type: "area",
+              position: { x, y },
+              data: { title: group.title },
+              draggable: false,
+              selectable: false,
+              connectable: false,
+              zIndex: -1,
+              style: {
+                width: Math.max(...cards.map((c) => c.x)) - x + 310,
+                height: Math.max(...cards.map((c) => c.y)) - y + 260,
+                background: "#b8ff5a06",
+                border: `1px dashed ${group.color}`,
+                borderRadius: 12,
+                pointerEvents: "none" as const,
+              },
             },
-          },
-        ];
-      }),
-      ...project.cards.map((card) => ({
-        id: card.id,
-        type: "research",
-        position: { x: card.x, y: card.y },
-        data: { card },
-        selected: card.id === selectedId,
-      })),
-    ]);
+          ];
+        }),
+        ...project.cards.map((card) => ({
+          id: card.id,
+          type: "research",
+          position: { x: card.x, y: card.y },
+          data: { card },
+          selected: card.id === selectedId,
+        })),
+      ];
+      // Keep React Flow's measurements when research data or selection changes.
+      // Replacing unchanged-size nodes without them can leave the board hidden
+      // while a ResizeObserver has no new size change to report.
+      return nextNodes.map((node) => {
+        const existing = existingNodes.get(node.id);
+        return existing?.type === node.type ? { ...existing, ...node } : node;
+      });
+    });
   }, [project.cards, project.groups, selectedId, setNodes]);
   useEffect(() => {
     if (activeProject.current !== project.id) {

@@ -210,6 +210,9 @@ test("Collector adds, edits, connects and moves evidence, then restores it after
   await page
     .getByRole("button", { name: "Close details", exact: true })
     .click();
+  const boardNodes = page.locator(".react-flow__node");
+  await expect(boardNodes).toHaveCount(8);
+  for (const node of await boardNodes.all()) await expect(node).toBeVisible();
   await page
     .getByRole("button", { name: "Fit research board", exact: true })
     .click();
