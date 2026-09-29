@@ -59,9 +59,14 @@ const test = base.extend<{ native: NativeSession }>({
       page = await application.firstWindow();
       page.on("pageerror", (error) => rendererErrors.push(error.message));
       await page.setViewportSize({ width: 1600, height: 1000 });
+      await expect(page.locator(".desktop-toolbar")).toBeVisible();
+      await page.getByRole("tab", { name: "Collector", exact: true }).click();
+      await page.getByRole("button", { name: "Board", exact: true }).click();
       await expect(
         page.getByRole("heading", { name: "THE COLLECTOR", exact: true }),
       ).toBeVisible();
+      if (!(await page.locator(".source-library").isVisible()))
+        await page.getByRole("button", { name: "Toggle board items" }).click();
       await application
         .context()
         .tracing.start({ screenshots: true, snapshots: true, sources: true });
@@ -134,6 +139,12 @@ async function useReleaser(page: Page) {
 
 async function generateOutline(page: Page, type?: string) {
   await useReleaser(page);
+  if (
+    !(await page
+      .getByRole("button", { name: "Build evidence brief", exact: true })
+      .isVisible())
+  )
+    await page.getByRole("button", { name: "New report", exact: true }).click();
   if (type)
     await page.locator(".release-kind").filter({ hasText: type }).click();
   await page
@@ -308,6 +319,7 @@ test("Releaser creates traceable outputs and presents only explicitly released r
   await page
     .getByRole("button", { name: "Save & release", exact: true })
     .click();
+  await page.getByRole("button", { name: /Release with limitations|Release reviewed revision/, exact: true }).click();
   await expect(second.locator(".release-markdown h1")).toHaveText("Hypothesis");
   const writeDenied = await second.evaluate(async () => {
     try {
@@ -318,6 +330,12 @@ test("Releaser creates traceable outputs and presents only explicitly released r
     }
   });
   expect(writeDenied).toContain("Use the Collector");
+  await page.getByRole("tab", { name: /Collector/ }).click();
+  await addNote(
+    page,
+    "Undo boundary check",
+    "A board edit must not change a later released report.",
+  );
   await generateOutline(page, "Research plan");
   await expect(page.locator(".release-markdown h1")).toHaveText(
     "Research plan",
@@ -326,16 +344,47 @@ test("Releaser creates traceable outputs and presents only explicitly released r
   await page
     .getByRole("button", { name: "Save & release", exact: true })
     .click();
+  await page.getByRole("button", { name: /Release with limitations|Release reviewed revision/, exact: true }).click();
   await expect(second.locator(".release-markdown h1")).toHaveText(
     "Research plan",
   );
+  await second.getByRole("button", { name: "Reports and evidence" }).click();
   await expect(second.locator(".release-output-item")).toHaveCount(1);
-  await page.locator(".report-citation").first().click();
-  await expect(page.getByRole("dialog")).toContainText(
-    "Immutable source version",
+  await second.getByRole("button", { name: "Reports and evidence" }).click();
+  const releaseBeforeUndo = (await project(page)).releasedOutputId;
+  await page.getByRole("tab", { name: /Collector/ }).click();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect
+    .poll(async () =>
+      (await project(page)).cards.some(
+        (c) => c.title === "Undo boundary check",
+      ),
+    )
+    .toBe(false);
+  expect((await project(page)).releasedOutputId).toBe(releaseBeforeUndo);
+  await expect(second.locator(".release-markdown h1")).toHaveText(
+    "Research plan",
   );
-  await expect(page.locator(".citation-target")).toBeVisible();
-  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await useReleaser(page);
+  const reference = page.locator(".report-citation").first();
+  const citationId = await reference.getAttribute("data-acadia-citation");
+  const citation = (await project(page)).outputs
+    .find((o) => o.id === releaseBeforeUndo)!
+    .citations!.find((c) => c.id === citationId)!;
+  await reference.click();
+  await expect(
+    page.getByRole("complementary", { name: "Source reader" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Source version")).toHaveValue(
+    citation.versionId,
+  );
+  await expect(page.locator(".citation-target")).toHaveAttribute(
+    "id",
+    `passage-${citation.passageId}`,
+  );
+  await page
+    .getByRole("button", { name: "Close source reader", exact: true })
+    .click();
   await page.getByRole("tab", { name: /Collector/ }).click();
   await page
     .locator(".library-item")
@@ -351,7 +400,7 @@ test("Releaser creates traceable outputs and presents only explicitly released r
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
   await useReleaser(page);
-  await expect(page.locator(".release-message.is-stale")).toBeVisible();
+  await expect(page.locator(".release-message.is-stale").first()).toBeVisible();
   await expect(second.locator(".release-markdown")).not.toContainText(
     "A new counterexample needs investigation.",
   );
@@ -391,6 +440,8 @@ test("Native imports retain text and originals; exports and project recovery rou
   });
   await stubOpen(native.app, [textPath, pdfPath]);
   await page.getByRole("button", { name: "Import files", exact: true }).click();
+  if (!(await page.locator(".source-library").isVisible()))
+    await page.getByRole("button", { name: "Toggle board items" }).click();
   await expect(page.locator(".library-item")).toHaveCount(9);
   await expect
     .poll(
@@ -493,6 +544,8 @@ test("Native imports retain text and originals; exports and project recovery rou
     page.getByRole("heading", { name: "THE COLLECTOR", exact: true }),
   ).toBeVisible();
   await expect.poll(async () => (await project(page)).id).not.toBe(imported.id);
+  if (!(await page.locator(".source-library").isVisible()))
+    await page.getByRole("button", { name: "Toggle board items" }).click();
   await expect(page.locator(".library-item")).toHaveCount(0);
   const recoveries = await readdir(
     join(native.directory, "profile/workspace/recovery"),
@@ -504,6 +557,11 @@ test("Native imports retain text and originals; exports and project recovery rou
   await page
     .getByRole("button", { name: "Import portable project", exact: true })
     .click();
+  await expect.poll(async () => (await project(page)).id).toBe(imported.id);
+  await page.getByRole("tab", { name: "Collector", exact: true }).click();
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  if (!(await page.locator(".source-library").isVisible()))
+    await page.getByRole("button", { name: "Toggle board items" }).click();
   await expect(page.locator(".library-item")).toHaveCount(9);
   const restored = await project(page);
   expect(restored.outputs).toHaveLength(1);

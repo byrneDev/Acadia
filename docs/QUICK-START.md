@@ -1,14 +1,22 @@
 # Acadia — quick start
 
-Acadia connects a research question to saved evidence, researcher assessments, and an editable report. The application keeps the RND Portal appearance. The Collector is your research workspace; the Releaser develops reports and presents explicitly released revisions.
+Acadia connects a research question to saved evidence, researcher assessments, and an editable report. The desktop interface retains the Acadia logo and lime accent while following the operating system’s appearance. The Collector is your research workspace; the Releaser develops reports and presents explicitly released revisions.
 
 Download the package for your platform from [GitHub Releases](https://github.com/byrneDev/Acadia/releases). For Ubuntu 24.04 x64 installation and troubleshooting, see [Acadia on Ubuntu](LINUX.md). Consult the release notes for the validation status of your exact build.
 
 ## Start an investigation
 
-Use the menu beside the project title to create a research board, open the **Project library**, import a portable `.acadia` project, or export one. Investigations stay in a local SQLite database. Switching projects does not require an export. Click the title to define the question and decision you want to investigate.
+Use the project switcher and menu in the navigation sidebar to create a research board, open the **Project library**, import a portable `.acadia` project, or export one. Investigations stay in a local SQLite database. Switching projects does not require an export. Click the title to define the question and decision you want to investigate.
 
 An optional fictional sample, `Library-hours-sample.acadia`, accompanies the release. Its survey favors later opening, its pilot provides counterevidence, and its missing information prevents a confident recommendation. It is a training example, not a real study.
+
+## Desktop controls
+
+**Appearance** in the sidebar offers System, Light, and Dark themes and comfortable, compact, or touch-sized controls. Navigation can collapse, and the navigation and source-reader dividers can be dragged or adjusted with arrow keys while focused. Desktop preferences and view positions stay on this computer; they are not part of portable research archives.
+
+Use **Cmd/Ctrl+K** for commands and **Cmd/Ctrl+F** to search the investigation. The platform menu lists shortcuts for importing, opening projects, and presenting. Undo/redo follows the focused board or editor. In the focused board, **F** fits the view, **C** starts a connection from a selected item, and **Shift+F10** opens board actions. **Board items** reveals the optional list without confusing board cards with the Sources library.
+
+The board remembers its position. Releaser remembers the selected report/revision, instructions, and scroll position. Source evidence forms survive closing/reopening the reader during the current app session; save them before quitting. The reader displays up to 40 passages at once and citation links jump to the correct page of passages automatically.
 
 ## Collector views
 
@@ -31,7 +39,9 @@ Public web capture stores a dated, sanitized, readable snapshot and paragraph lo
 
 ## Analysis privacy and optional connections
 
-Open **Research engine settings**. Each project explicitly uses **Local** or **Cloud** analysis. Local mode supports the offline outline engine or a model at a loopback address. Cloud mode requires a selected provider endpoint and model. Acadia never silently falls back to a cloud service.
+Open **Research engine settings**. Each project explicitly uses **Local** or **Server or cloud** analysis. A remote server through an SSH tunnel still requires the server/cloud choice. Local mode supports the offline outline engine or a model at a loopback address. Server/cloud mode requires a selected provider endpoint and model. Acadia never silently falls back to a cloud service.
+
+**Find installed models** queries a local Ollama service only when clicked. **Test connection** checks the model inventory without submitting research or generating text; it does not verify generation or billing availability. Named connection presets remember the endpoint, model, and privacy choice without API keys. A different authenticated connection may require entering its key again.
 
 The offline engine organizes retrieved evidence and limitations; it does not infer conclusions. For AI synthesis, run your own Ollama model or enter a compatible chat-completions endpoint. Acadia does not install a language model. Model responses must follow the requested citation structure; an unsupported response is reported as a failure rather than applied.
 
@@ -41,7 +51,7 @@ Brave Search is independent of analysis. Add an optional Brave Search API key in
 
 ## Write and release a report
 
-In **Releaser**, choose a decision brief, hypothesis, research plan, whitepaper, gap analysis, or needs analysis. Build an evidence brief or generate an AI draft. Edit headings, paragraphs, lists, tables, and persistent numbered citations directly. Click a citation to open its exact saved passage.
+In **Releaser**, select **New report**, then choose a decision brief, hypothesis, research plan, whitepaper, gap analysis, or needs analysis. The report composer opens automatically when there are no reports. Build an evidence brief or generate an AI draft. Edit headings, paragraphs, lists, tables, and persistent numbered citations directly. Click a citation to open its exact saved passage beside the report. **Reports and evidence** shows the report library, outline, and source index when needed.
 
 Select a section and request an AI revision. Acadia previews the proposal before applying it. Other writing and citations stay intact. If the selected text changed while a revision ran, select it again. Offline mode cannot perform AI revisions.
 
@@ -51,10 +61,16 @@ Export **DOCX** for an editable Word document, **PDF** for print, or **Markdown*
 
 ## Displays, portability, and recovery
 
-Connect your monitor or TV through your operating system, select **Open display**, then choose the screen. The second window is read-only and starts empty until a report is explicitly released. Touch/trackpad board navigation is supported; verify your physical touchscreen and mixed-DPI setup before a live presentation.
+Connect your monitor or TV through your operating system, select **Present**, then choose the screen. The second window is read-only and starts empty until a report is explicitly released. Touch/trackpad board navigation is supported; verify your physical touchscreen and mixed-DPI setup before a live presentation.
 
 The app saves locally and waits for the Collector's final save on close. Interrupted background work is marked for explicit retry at the next launch. The first migration backs up the legacy JSON and attachment manifest before its database transaction. Original files remain separate from database records.
 
-Version 2 `.acadia` exports include source versions, historical passages, original attachments, evidence, tasks, report revisions, and analysis provenance. They exclude credentials and rebuildable search indexes. Importing a project already in the library replaces that investigation after saving a recovery archive. Old card-level citations remain labeled until source originals are reprocessed; existing reports retain their legacy references.
+Version 3 `.acadia` exports require Acadia 0.4 or later and include source versions, historical passages, original attachments, evidence, tasks, report revisions, analysis provenance, and versioned analytical pedigree. Version 1 and 2 archives remain importable with new assessments initially unassessed. They exclude credentials and rebuildable search indexes. Importing a project already in the library replaces that investigation after saving a recovery archive. Old card-level citations remain labeled until source originals are reprocessed; existing reports retain their legacy references.
 
 Each attachment is limited to 250 MB and portable archives to approximately 1 GB. These are storage safety limits, not leading-text or page-count cutoffs. Recovery archives and old source versions consume disk space; keep separate backups before managing application data.
+
+## Research methods and delivery in v0.4
+
+Start in Research brief, appraise sources in their reader, then assess findings and assumptions in Evidence. **Add item** now includes all five research methods alongside Note, Question, Hypothesis and Link. Choose a method and **Add worksheet to board**, then select its card and **Open worksheet**. The same worksheets remain available in Methods. Challenge analysis is an explicit optional AI action. In Releaser, preview the analytical pedigree appendix and review limitations before release.
+
+After an analysis, choose Plan a deliverable for software, curriculum or another intervention. Review the resulting work packages before exporting to a PMIS. Project menu → Export data for Power BI creates linked local CSV tables and import guidance. See [Research methods](RESEARCH-METHODS.md) and [Power BI](POWER-BI.md). Portable projects exported by v0.4 require v0.4 or later.

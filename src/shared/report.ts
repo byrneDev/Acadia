@@ -50,11 +50,14 @@ function inline(tokens: Token[], citations: Citation[]): ReportDocument[] {
     }
     let cursor = 0;
     for (const match of text.matchAll(/\[(S?\d+)\]/g)) {
-      const citation = citations.find(
-        (entry, index) =>
-          entry.label.replace(/[\[\]]/g, "") === match[1] ||
-          String(index + 1) === match[1],
-      );
+      // Explicit source labels take precedence over a positional legacy fallback.
+      // Otherwise a nonconsecutive model label can bind to an earlier array slot.
+      const label = match[1].replace(/^S/, "");
+      const citation =
+        citations.find(
+          (entry) =>
+            entry.label.replace(/[\[\]]/g, "").replace(/^S/, "") === label,
+        ) ?? citations[Number(label) - 1];
       if (!citation) continue;
       add(text.slice(cursor, match.index));
       nodes.push({
@@ -268,6 +271,11 @@ export function snapshotRevision(
     markdown: reportToMarkdown(document, citations),
     citations,
     note,
+    pedigreeSnapshotId: output.pedigreeSnapshotId,
+    plan: output.plan ? structuredClone(output.plan) : undefined,
+    deliveryPlan: output.deliveryPlan
+      ? { ...structuredClone(output.deliveryPlan), sourceRevisionId: id }
+      : undefined,
   };
 }
 
@@ -286,6 +294,9 @@ export function releasedReport(project: Project): ResearchOutput | undefined {
         markdown: revision.markdown,
         citations: revision.citations,
         createdAt: revision.createdAt,
+        pedigreeSnapshotId: revision.pedigreeSnapshotId,
+        plan: revision.plan,
+        deliveryPlan: revision.deliveryPlan,
       }
     : undefined;
 }

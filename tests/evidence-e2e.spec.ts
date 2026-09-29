@@ -115,15 +115,12 @@ async function importFiles(
 }
 async function view(page: Page, name: string) {
   await page
-    .getByRole("navigation", { name: "Collector views" })
+    .getByRole("navigation", { name: "Research views" })
     .getByRole("button", { name, exact: true })
     .click();
 }
 async function closeReader(page: Page) {
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Close dialog" })
-    .click();
+  await page.getByRole("button", { name: "Close source reader" }).click();
 }
 
 // This fixture has a known positive lab result, a contradictory field observation,
@@ -302,6 +299,7 @@ test("editing a report keeps the selected released version private and citations
   await page
     .getByRole("button", { name: "Save & release", exact: true })
     .click();
+  await page.getByRole("button", { name: /Release with limitations|Release reviewed revision/, exact: true }).click();
   await expect
     .poll(async () => (await project(page)).outputs[0].releasedRevisionId)
     .toBeTruthy();
@@ -363,9 +361,14 @@ test("editing a report keeps the selected released version private and citations
       }),
     )
     .toBe(2);
-  await expect(page.locator(".release-message.is-stale")).toContainText(
-    "cited source version",
-  );
+  await expect(
+    page
+      .locator(".release-message.is-stale")
+      .filter({ hasText: "cited source version" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Reports and evidence", exact: true })
+    .click();
   await page
     .locator(".release-source-item")
     .filter({ hasText: "Cedar field evidence" })
@@ -380,6 +383,7 @@ test("editing a report keeps the selected released version private and citations
   await page
     .getByRole("button", { name: "Save & release", exact: true })
     .click();
+  await page.getByRole("button", { name: /Release with limitations|Release reviewed revision/, exact: true }).click();
   await expect(audience.getByLabel("Released report")).toContainText(
     "PRIVATE FOLLOW-UP",
   );
@@ -391,6 +395,8 @@ test("Releaser read APIs expose only released historical passages and cannot rea
   const { app, page, directory } = research;
   const stamp = new Date().toISOString();
   const draft = createBlankProject();
+  // This fixture deliberately exercises a released v2 archive without pedigree records.
+  draft.schemaVersion = 2;
   draft.title = "PRIVATE PROJECT TITLE";
   draft.question = "PRIVATE RESEARCH QUESTION";
   draft.privacy = {
@@ -800,12 +806,23 @@ test("Releaser read APIs expose only released historical passages and cannot rea
   expect(attachment.openError).toContain("Use the Collector");
   expect([0, 403]).toContain(attachment.status);
   expect(attachment.body).not.toContain("PRIVATE ORIGINAL ATTACHMENT");
+  await audience
+    .getByRole("button", { name: /Published source.*Paragraph 1/ })
+    .first()
+    .click();
+  await expect(
+    audience.locator(".source-passage.citation-target"),
+  ).toContainText(publishedText);
   // Revoking the release closes the read boundary immediately, even with known IDs.
   await page.evaluate(async () => {
     const project = (await window.acadia!.load()).project;
     delete project.releasedOutputId;
     await window.acadia!.save(project);
   });
+  await expect(
+    audience.getByRole("complementary", { name: "Source reader", exact: true }),
+  ).toHaveCount(0);
+  await expect(audience.locator(".source-passage")).toHaveCount(0);
   const cleared = await audience.evaluate(async (id) => {
     let error = "";
     try {
@@ -825,4 +842,10 @@ test("Releaser read APIs expose only released historical passages and cannot rea
   expect(cleared.error).toContain(
     "not included in the selected released revision",
   );
+  // The fixture changed storage directly through IPC. Reload the Collector so its
+  // close-time save does not try to resubmit the now-revoked legacy release.
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "THE COLLECTOR", exact: true }),
+  ).toBeVisible();
 });

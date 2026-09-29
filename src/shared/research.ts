@@ -4,7 +4,12 @@ import type {
   OutputKind,
   Project,
   ResearchOutput,
+  ProjectPlanContext,
 } from "./types";
+import type { ModelRequestAudit, RetrievalManifest, QuoteAssociation } from "./pedigree-analysis";
+import type { ChallengeTarget } from "./pedigree-analysis";
+import type { DeliveryPlan } from "./pmis";
+import type { ResearchBrief, SourceAppraisal, SourceOrigin, FindingAssessment, ResearchAssumption, MethodWorksheet, ReviewIssue, PedigreeState, PedigreeEntityKind, PedigreeRevision, PedigreeSnapshot } from "./pedigree";
 export type Inclusion = "include" | "pin" | "exclude";
 export type ExtractionStatus =
   | "queued"
@@ -105,6 +110,8 @@ export interface ResearchTask {
   title: string;
   question: string;
   claimId?: string;
+  assumptionId?: string;
+  methodId?: string;
   status: "planned" | "doing" | "blocked" | "complete";
   dueDate?: string;
   criterion: string;
@@ -121,7 +128,9 @@ export interface ResearchJob {
     | "discovery"
     | "analysis"
     | "answer"
-    | "revision";
+    | "revision"
+    | "challenge"
+    | "method-assistance";
   label: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   progress: number;
@@ -149,6 +158,10 @@ export interface AnalysisRun {
   passages?: Passage[];
   queries?: { support: string[]; counter: string[]; gaps: string[] };
   groundingWarnings?: string[];
+  requests?: ModelRequestAudit[];
+  retrieval?: RetrievalManifest;
+  quotationAssociations?: QuoteAssociation[];
+  pedigreeSnapshotId?: string;
 }
 export interface ResearchAnswer {
   answer: string;
@@ -235,6 +248,15 @@ export interface ReportRevision {
   markdown: string;
   citations: Citation[];
   note: string;
+  pedigreeSnapshotId?: string;
+  review?: ReleaseReview;
+  plan?: ProjectPlanContext;
+  deliveryPlan?: DeliveryPlan;
+}
+export interface ReleaseReview {
+  checkedAt: string;
+  warnings: string[];
+  acknowledged: boolean;
 }
 export interface SectionProposal {
   id: string;
@@ -244,6 +266,19 @@ export interface SectionProposal {
   runId?: string;
 }
 export interface ResearchAPI {
+  pedigreeState(): Promise<PedigreeState>;
+  saveResearchBrief(value: ResearchBrief): Promise<ResearchBrief>;
+  saveSourceAppraisal(value: SourceAppraisal): Promise<SourceAppraisal>;
+  saveOriginRelationship(value: SourceOrigin): Promise<SourceOrigin>;
+  saveFindingAssessment(value: FindingAssessment): Promise<FindingAssessment>;
+  saveAssumption(value: ResearchAssumption): Promise<ResearchAssumption>;
+  saveMethod(value: MethodWorksheet): Promise<MethodWorksheet>;
+  saveReviewIssue(value: ReviewIssue): Promise<ReviewIssue>;
+  pedigreeRevisions(kind: PedigreeEntityKind, id: string): Promise<PedigreeRevision[]>;
+  createPedigreeSnapshot(): Promise<PedigreeSnapshot>;
+  getPedigreeSnapshot(id: string): Promise<PedigreeSnapshot>;
+  challengeAnalysis(target: ChallengeTarget): Promise<ResearchJob>;
+  assistMethod(methodId: string): Promise<ResearchJob>;
   listProjects(): Promise<ProjectSummary[]>;
   switchProject(
     id: string,

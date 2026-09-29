@@ -10,6 +10,7 @@ import {
   Film,
   StickyNote,
   ArrowUpRight,
+  Layers,
 } from "lucide-react";
 import type { ResearchCard } from "../../shared/types";
 export const cardIcons = {
@@ -28,7 +29,7 @@ export default memo(function ResearchNode({
   selected,
 }: NodeProps<BoardNode>) {
   const card = data.card,
-    Icon = cardIcons[card.kind];
+    Icon = card.methodId ? Layers : cardIcons[card.kind];
   return (
     <article
       className={`research-card kind-${card.kind} ${selected ? "is-selected" : ""}`}
@@ -41,7 +42,7 @@ export default memo(function ResearchNode({
       <div className="card-heading">
         <span>
           <Icon size={13} />
-          {card.kind}
+          {card.methodId ? "Research method" : card.kind}
         </span>
         <span className={`status-dot ${card.status}`} title={card.status} />
       </div>

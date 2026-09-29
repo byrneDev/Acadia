@@ -5,9 +5,60 @@ import {
 } from "../shared/project";
 import { createOfflineOutput } from "../shared/offline";
 import type { AISettings, ImportedAsset, Project } from "../shared/types";
+import {
+  DEFAULT_DESKTOP_PREFERENCES,
+  desktopPreferencePatch,
+  type DesktopState,
+} from "../shared/desktop";
 // Development-only browser adapter. The packaged desktop app always uses its isolated preload.
 if (!window.acadia) {
   const key = "acadia-preview-v1";
+  const preferencesKey = "acadia-preview-appearance-v1";
+  let preferences = { ...DEFAULT_DESKTOP_PREFERENCES };
+  try {
+    const saved = localStorage.getItem(preferencesKey);
+    if (saved)
+      preferences = {
+        ...preferences,
+        ...desktopPreferencePatch(JSON.parse(saved)),
+      };
+  } catch {}
+  const dark = matchMedia("(prefers-color-scheme: dark)");
+  const contrast = matchMedia("(forced-colors: active)");
+  const motion = matchMedia("(prefers-reduced-motion: reduce)");
+  const desktopState = (): DesktopState => ({
+    preferences: { ...preferences },
+    appearance: {
+      platform: /Mac/i.test(navigator.platform)
+        ? "darwin"
+        : /Win/i.test(navigator.platform)
+          ? "win32"
+          : "linux",
+      theme:
+        preferences.theme === "system"
+          ? dark.matches
+            ? "dark"
+            : "light"
+          : preferences.theme,
+      highContrast: contrast.matches,
+      reducedMotion: motion.matches,
+    },
+  });
+  const desktopListeners = new Set<(state: DesktopState) => void>();
+  const appearanceChanged = () =>
+    desktopListeners.forEach((callback) => callback(desktopState()));
+  for (const query of [dark, contrast, motion])
+    query.addEventListener("change", appearanceChanged);
+  window.addEventListener("storage", (event) => {
+    if (event.key !== preferencesKey) return;
+    try {
+      preferences = {
+        ...DEFAULT_DESKTOP_PREFERENCES,
+        ...desktopPreferencePatch(JSON.parse(event.newValue || "{}")),
+      };
+      appearanceChanged();
+    } catch {}
+  });
   let current: Project;
   try {
     current = validateProject(JSON.parse(localStorage.getItem(key) || "null"));
@@ -55,6 +106,38 @@ if (!window.acadia) {
     );
   };
   window.acadia = {
+    exportProjectPlan: desktopOnly,
+    exportPowerBI: desktopOnly,
+    pedigreeState: desktopOnly,
+    saveResearchBrief: desktopOnly,
+    saveSourceAppraisal: desktopOnly,
+    saveOriginRelationship: desktopOnly,
+    saveFindingAssessment: desktopOnly,
+    saveAssumption: desktopOnly,
+    saveMethod: desktopOnly,
+    saveReviewIssue: desktopOnly,
+    pedigreeRevisions: desktopOnly,
+    createPedigreeSnapshot: desktopOnly,
+    getPedigreeSnapshot: desktopOnly,
+    challengeAnalysis: desktopOnly,
+    assistMethod: desktopOnly,
+    getDesktopState: async () => desktopState(),
+    saveDesktopPreferences: async (patch) => {
+      if (window.location.hash === "#releaser")
+        throw new Error("Use the Collector to change appearance preferences.");
+      const next = { ...preferences, ...desktopPreferencePatch(patch) };
+      localStorage.setItem(preferencesKey, JSON.stringify(next));
+      preferences = next;
+      appearanceChanged();
+      return desktopState();
+    },
+    onDesktopChanged: (callback) => {
+      desktopListeners.add(callback);
+      return () => desktopListeners.delete(callback);
+    },
+    onCommand: () => () => {},
+    listLocalModels: desktopOnly,
+    testAIConnection: desktopOnly,
     listProjects: async () => [
       {
         id: current.id,

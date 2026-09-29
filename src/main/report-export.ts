@@ -18,12 +18,27 @@ import {
   reportCitations,
   reportDocument,
   reportToMarkdown,
+  markdownToReport,
 } from "../shared/report";
+import { deliveryPlanMarkdown } from "../shared/pmis";
 import { escapeHTML } from "./storage";
+function exportDocument(output: ResearchOutput): ReportDocument {
+  const document = reportDocument(output);
+  return output.deliveryPlan
+    ? {
+        ...document,
+        content: [
+          ...(document.content || []),
+          ...(markdownToReport(deliveryPlanMarkdown(output.deliveryPlan))
+            .content || []),
+        ],
+      }
+    : document;
+}
 
 export function exportReportMarkdown(output: ResearchOutput): string {
   const citations = reportCitations(output);
-  return `${reportToMarkdown(reportDocument(output), citations)}${citations.length ? `\n\n## Bibliography\n\n${citations.map((citation, index) => `[${index + 1}] ${citationDescription(citation)}${citation.quote ? `\n\n> ${citation.quote.replace(/\n/g, "\n> ")}` : ""}`).join("\n\n")}` : ""}\n`;
+  return `${reportToMarkdown(exportDocument(output), citations)}${citations.length ? `\n\n## Bibliography\n\n${citations.map((citation, index) => `[${index + 1}] ${citationDescription(citation)}${citation.quote ? `\n\n> ${citation.quote.replace(/\n/g, "\n> ")}` : ""}`).join("\n\n")}` : ""}\n`;
 }
 
 /** Restrictive structured renderer. No HTML, images, script, or remote resource loading. */
@@ -55,6 +70,19 @@ export function reportBodyHTML(
       return `<sup class="citation">[${citationNumber(node, citations)}]</sup>`;
     if (node.type === "hardBreak") return "<br>";
     if (node.type === "horizontalRule") return "<hr>";
+    if (node.type === "table") {
+      const rows = node.content || [];
+      let firstBody = rows.findIndex(
+        (row) =>
+          !row.content?.length ||
+          !row.content.every((cell) => cell.type === "tableHeader"),
+      );
+      if (firstBody < 0) firstBody = rows.length;
+      const header = firstBody
+        ? `<thead>${rows.slice(0, firstBody).map(render).join("")}</thead>`
+        : "";
+      return `<table>${header}<tbody>${rows.slice(firstBody).map(render).join("")}</tbody></table>`;
+    }
     if (node.type === "heading") {
       const level = Math.min(6, Math.max(1, Number(node.attrs?.level) || 2));
       return `<h${level}>${children()}</h${level}>`;
@@ -84,7 +112,7 @@ export function outputHTML(output: ResearchOutput): string {
   const bibliography = citations.length
     ? `<section class="bibliography"><h2>Bibliography</h2><ol>${citations.map((citation) => `<li>${escapeHTML(citationDescription(citation))}${citation.quote ? `<blockquote>${escapeHTML(citation.quote)}</blockquote>` : ""}</li>`).join("")}</ol></section>`
     : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>${escapeHTML(output.title)}</title><style>@page{size:A4;margin:19mm 18mm}body{color:#18231f;font:11pt/1.55 Arial,sans-serif}h1{font-size:25pt;line-height:1.2}h2{font-size:17pt;border-bottom:1px solid #ccd5cb;padding-bottom:5px}h3{font-size:13pt}h1,h2,h3,h4{break-after:avoid}p,li{overflow-wrap:anywhere}pre{white-space:pre-wrap;background:#f0f4f2;padding:12px}table{border-collapse:collapse;width:100%;font-size:9pt;table-layout:fixed}th,td{border:1px solid #bbc8ba;padding:7px;vertical-align:top;overflow-wrap:anywhere}th{background:#edf2e9}tr{break-inside:avoid}thead{display:table-header-group}blockquote{margin:12px 0;padding:6px 12px;border-left:2px solid #889b7b;font-size:10pt}a{color:#2c593c}.brand{font-size:9pt;letter-spacing:2px;color:#67776e;border-bottom:1px solid #b6c7bd;padding-bottom:12px;margin-bottom:24px}.citation{color:#456234;font-weight:bold}.bibliography{font-size:9pt}.bibliography li{margin-bottom:14px}.bibliography blockquote{font-size:9pt}hr{border:0;border-top:1px solid #cbd4c9}</style></head><body><div class="brand">ACADIA / RELEASER</div>${reportBodyHTML(reportDocument(output), citations)}${bibliography}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>${escapeHTML(output.title)}</title><style>@page{size:A4;margin:19mm 18mm}body{color:#18231f;font:11pt/1.55 Arial,sans-serif}h1{font-size:25pt;line-height:1.2}h2{font-size:17pt;border-bottom:1px solid #ccd5cb;padding-bottom:5px}h3{font-size:13pt}h1,h2,h3,h4{break-after:avoid}p,li{overflow-wrap:anywhere}pre{white-space:pre-wrap;background:#f0f4f2;padding:12px}table{border-collapse:collapse;width:100%;font-size:9pt;table-layout:fixed}th,td{border:1px solid #bbc8ba;padding:7px;vertical-align:top;overflow-wrap:anywhere}th{background:#edf2e9}tr{break-inside:avoid}thead{display:table-header-group}blockquote{margin:12px 0;padding:6px 12px;border-left:2px solid #889b7b;font-size:10pt}a{color:#2c593c}.brand{font-size:9pt;letter-spacing:2px;color:#67776e;border-bottom:1px solid #b6c7bd;padding-bottom:12px;margin-bottom:24px}.citation{color:#456234;font-weight:bold}.bibliography{font-size:9pt}.bibliography li{margin-bottom:14px}.bibliography blockquote{font-size:9pt}hr{border:0;border-top:1px solid #cbd4c9}</style></head><body><div class="brand">ACADIA / RELEASER</div>${reportBodyHTML(exportDocument(output), citations)}${bibliography}</body></html>`;
 }
 
 export async function exportReportDocx(
@@ -189,6 +217,7 @@ export async function exportReportDocx(
                 ]
               : undefined,
           spacing: { after: 160 },
+          keepNext: node.type === "heading",
           indent: depth ? { left: depth * 240 } : undefined,
         }),
       ];
@@ -200,7 +229,7 @@ export async function exportReportDocx(
       ],
       spacing: { after: 300 },
     }),
-    ...blocks(reportDocument(output).content || []),
+    ...blocks(exportDocument(output).content || []),
   ];
   if (citations.length) {
     children.push(

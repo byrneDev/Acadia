@@ -13,7 +13,26 @@ import {
 } from "@xyflow/react";
 import { Plus, Minus, Scan, Hand, Maximize, X, Link2 } from "lucide-react";
 import type { Connection, Project, ResearchCard } from "../../shared/types";
-import ResearchNode, { type BoardNode } from "./ResearchNode";
+import ResearchNode from "./ResearchNode";
+import {
+  readBoardViewport,
+  saveBoardViewport,
+  type BoardViewport,
+} from "./workspaceViewState";
+import "./Collector.css";
+const lastFocused = new Map<string, string>();
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReduced(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}
 const nodeTypes = {
   research: ResearchNode,
   area: ({ data }: { data: { title: string } }) => (
@@ -21,11 +40,11 @@ const nodeTypes = {
   ),
 };
 const relationColors: Record<string, string> = {
-  supports: "#b8ff5a",
-  contradicts: "#ff8570",
-  "derived from": "#78c8cc",
-  investigate: "#ffb000",
-  "relates to": "#6f8559",
+  supports: "var(--connection-supports, var(--phosphor))",
+  contradicts: "var(--connection-contradicts, var(--danger))",
+  "derived from": "var(--connection-derived, var(--text))",
+  investigate: "var(--connection-investigate, var(--amber))",
+  "relates to": "var(--connection-related, var(--muted))",
 };
 interface Props {
   project: Project;
@@ -57,7 +76,22 @@ function Board(props: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [panMode, setPanMode] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [zoom, setZoom] = useState(1);
+  const [initialViewport] = useState(() => readBoardViewport(project.id));
+  const [zoom, setZoom] = useState(initialViewport?.zoom || 1);
+  const viewport = useRef<BoardViewport | undefined>(initialViewport);
+  const reducedMotion = useReducedMotion();
+  const duration = reducedMotion ? 0 : 220;
+  const [context, setContext] = useState<{
+    x: number;
+    y: number;
+    flowX: number;
+    flowY: number;
+    cardId?: string;
+  }>();
+  const [connectFrom, setConnectFrom] = useState("");
+  const [connectTo, setConnectTo] = useState("");
+  const contextRef = useRef<HTMLDivElement>(null);
+  const connectionTarget = useRef<HTMLSelectElement>(null);
   const {
     fitView,
     zoomIn,
@@ -67,8 +101,41 @@ function Board(props: Props) {
     getViewport,
     setViewport,
   } = useReactFlow();
-  const activeProject = useRef(project.id);
   const wrapper = useRef<HTMLDivElement>(null);
+  useEffect(
+    () => () => {
+      if (viewport.current) saveBoardViewport(project.id, viewport.current);
+    },
+    [project.id],
+  );
+  useEffect(() => {
+    if (context)
+      contextRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [context]);
+  useEffect(() => {
+    if (connectFrom) connectionTarget.current?.focus();
+  }, [connectFrom]);
+  function openContext(
+    event: { preventDefault: () => void; clientX: number; clientY: number },
+    cardId?: string,
+  ) {
+    event.preventDefault();
+    const bounds = wrapper.current!.getBoundingClientRect();
+    const p = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    if (cardId) onSelect(cardId);
+    setContext({
+      x: Math.max(8, Math.min(event.clientX - bounds.left, bounds.width - 230)),
+      y: Math.max(8, Math.min(event.clientY - bounds.top, bounds.height - 160)),
+      flowX: p.x,
+      flowY: p.y,
+      cardId,
+    });
+  }
+  function beginConnection(id: string) {
+    setConnectFrom(id);
+    setConnectTo("");
+    setContext(undefined);
+  }
   useEffect(() => {
     setNodes((currentNodes) => {
       const existingNodes = new Map(
@@ -121,15 +188,14 @@ function Board(props: Props) {
     });
   }, [project.cards, project.groups, selectedId, setNodes]);
   useEffect(() => {
-    if (activeProject.current !== project.id) {
-      activeProject.current = project.id;
-      requestAnimationFrame(() => fitView({ padding: 0.18, duration: 300 }));
-    }
-  }, [project.id, fitView]);
-  useEffect(() => {
     if (!focusId) return;
+    const focusToken = `${focusId}:${focusKey}`;
+    if (lastFocused.get(project.id) === focusToken) return;
     const card = project.cards.find((c) => c.id === focusId);
-    if (card) setCenter(card.x + 140, card.y + 105, { zoom: 1, duration: 350 });
+    if (card) {
+      lastFocused.set(project.id, focusToken);
+      void setCenter(card.x + 140, card.y + 105, { zoom: 1, duration });
+    }
   }, [focusId, focusKey]);
   const edges: Edge[] = useMemo(
     () =>
@@ -139,13 +205,14 @@ function Board(props: Props) {
         target: c.target,
         label: c.relation,
         type: "default",
+        className: `connection-${c.relation.replaceAll(" ", "-")}`,
         style: { stroke: relationColors[c.relation], strokeWidth: 1.6 },
         labelStyle: {
-          fill: relationColors[c.relation],
+          fill: "var(--text)",
           fontSize: 10,
-          fontFamily: "monospace",
+          fontFamily: "var(--font-ui)",
         },
-        labelBgStyle: { fill: "#0c1209", fillOpacity: 0.95 },
+        labelBgStyle: { fill: "var(--panel)", fillOpacity: 0.98 },
         labelBgPadding: [7, 4] as [number, number],
         labelBgBorderRadius: 3,
         markerEnd: {
@@ -170,6 +237,50 @@ function Board(props: Props) {
     <div
       className={`board ${dragOver ? "is-dropping" : ""}`}
       ref={wrapper}
+      tabIndex={0}
+      onPointerDownCapture={(e) => {
+        if (e.button !== 0) return;
+        const interactive = (e.target as HTMLElement).closest(
+          "input,textarea,select,button,a,[contenteditable=true],[tabindex]",
+        );
+        if (!interactive || interactive === e.currentTarget)
+          e.currentTarget.focus({ preventScroll: true });
+      }}
+      aria-label="Research board. F fits the board. C connects the selected item. Shift F10 opens board actions."
+      onKeyDown={(e) => {
+        const target = e.target as HTMLElement;
+        if (
+          target.closest(
+            "input, textarea, select, [contenteditable=true], [role=menu], .board-connection-form",
+          ) ||
+          e.metaKey ||
+          e.ctrlKey ||
+          e.altKey
+        )
+          return;
+        if (e.key === "Escape") {
+          setContext(undefined);
+          setConnectFrom("");
+          return;
+        }
+        if (e.shiftKey && e.key === "F10") {
+          const bounds = wrapper.current!.getBoundingClientRect();
+          openContext(
+            {
+              preventDefault: () => e.preventDefault(),
+              clientX: bounds.left + bounds.width / 2,
+              clientY: bounds.top + bounds.height / 2,
+            },
+            selectedId || undefined,
+          );
+        } else if (e.key.toLowerCase() === "f") {
+          e.preventDefault();
+          void fitView({ padding: 0.16, duration });
+        } else if (e.key.toLowerCase() === "c" && selectedId) {
+          e.preventDefault();
+          beginConnection(selectedId);
+        }
+      }}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
@@ -189,7 +300,13 @@ function Board(props: Props) {
         onNodeClick={(_, n) => {
           if (n.type === "research") onSelect(n.id);
         }}
-        onPaneClick={() => onSelect(null)}
+        onPaneClick={() => {
+          onSelect(null);
+          setContext(undefined);
+        }}
+        onNodeContextMenu={(e, n) => {
+          if (n.type === "research") openContext(e, n.id);
+        }}
         onEdgeClick={(_, e) => {
           const c = project.connections.find((c) => c.id === e.id);
           if (c) onEdge(c);
@@ -199,13 +316,19 @@ function Board(props: Props) {
             moved.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y })),
           )
         }
-        onMove={(_, v) => setZoom(v.zoom)}
-        onPaneContextMenu={(e) => {
-          e.preventDefault();
-          const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-          onAdd(p.x, p.y);
+        onMove={(_, v) => {
+          viewport.current = v;
+          setZoom((z) =>
+            Math.round(z * 100) === Math.round(v.zoom * 100) ? z : v.zoom,
+          );
         }}
-        fitView
+        onMoveEnd={(_, v) => {
+          viewport.current = v;
+          saveBoardViewport(project.id, v);
+        }}
+        onPaneContextMenu={(e) => openContext(e)}
+        defaultViewport={initialViewport}
+        fitView={!initialViewport}
         fitViewOptions={{ padding: 0.17, maxZoom: 0.95 }}
         minZoom={0.12}
         maxZoom={2.5}
@@ -244,6 +367,13 @@ function Board(props: Props) {
         />
       </ReactFlow>
       <div className="board-areas">
+        <button
+          disabled={!selectedId}
+          onClick={() => selectedId && beginConnection(selectedId)}
+          title="Connect the selected item (C)"
+        >
+          <Link2 size={14} /> Connect item
+        </button>
         <button onClick={props.onAreas}>Research areas</button>
         <select
           aria-label="Saved board views"
@@ -251,10 +381,7 @@ function Board(props: Props) {
           onChange={(e) => {
             const v = project.views?.find((v) => v.id === e.target.value);
             if (v)
-              void setViewport(
-                { x: v.x, y: v.y, zoom: v.zoom },
-                { duration: 300 },
-              );
+              void setViewport({ x: v.x, y: v.y, zoom: v.zoom }, { duration });
             e.target.value = "";
           }}
         >
@@ -300,7 +427,7 @@ function Board(props: Props) {
         <span className="tool-divider" />
         <button
           className="icon-button"
-          onClick={() => zoomOut()}
+          onClick={() => zoomOut({ duration })}
           aria-label="Zoom out"
         >
           <Minus size={17} />
@@ -308,7 +435,7 @@ function Board(props: Props) {
         <span className="zoom-label">{Math.round(zoom * 100)}%</span>
         <button
           className="icon-button"
-          onClick={() => zoomIn()}
+          onClick={() => zoomIn({ duration })}
           aria-label="Zoom in"
         >
           <Plus size={17} />
@@ -316,7 +443,7 @@ function Board(props: Props) {
         <span className="tool-divider" />
         <button
           className="icon-button"
-          onClick={() => fitView({ padding: 0.16, duration: 350 })}
+          onClick={() => fitView({ padding: 0.16, duration })}
           aria-label="Fit research board"
         >
           <Scan size={18} />
@@ -329,6 +456,151 @@ function Board(props: Props) {
           <Maximize size={17} />
         </button>
       </div>
+      {context && (
+        <>
+          <button
+            className="board-context-dismiss"
+            aria-label="Close board actions"
+            onClick={() => {
+              setContext(undefined);
+              wrapper.current?.focus();
+            }}
+          />
+          <div
+            className="board-context-menu"
+            ref={contextRef}
+            role="menu"
+            aria-label="Board actions"
+            style={{ left: context.x, top: context.y }}
+            onKeyDown={(e) => {
+              const items = Array.from(
+                e.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
+              );
+              const index = items.indexOf(
+                document.activeElement as HTMLButtonElement,
+              );
+              if (e.key === "Escape" || e.key === "Tab") {
+                setContext(undefined);
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  wrapper.current?.focus();
+                }
+              }
+              if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+                e.preventDefault();
+                const next =
+                  e.key === "Home"
+                    ? 0
+                    : e.key === "End"
+                      ? items.length - 1
+                      : (index +
+                          (e.key === "ArrowDown" ? 1 : -1) +
+                          items.length) %
+                        items.length;
+                items[next]?.focus();
+              }
+            }}
+          >
+            <button
+              role="menuitem"
+              onClick={() => {
+                onAdd(context.flowX, context.flowY);
+                setContext(undefined);
+              }}
+            >
+              Add item here
+            </button>
+            {context.cardId && (
+              <button
+                role="menuitem"
+                onClick={() => beginConnection(context.cardId!)}
+              >
+                Connect this item…
+              </button>
+            )}
+            <button
+              role="menuitem"
+              onClick={() => {
+                void fitView({ padding: 0.16, duration });
+                setContext(undefined);
+              }}
+            >
+              Fit board
+            </button>
+            <button
+              role="menuitem"
+              onClick={() => {
+                props.onAreas();
+                setContext(undefined);
+              }}
+            >
+              Research areas
+            </button>
+          </div>
+        </>
+      )}
+      {connectFrom && (
+        <form
+          className="board-connection-form"
+          aria-label="Connect board items"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!connectTo) return;
+            onConnect({
+              source: connectFrom,
+              target: connectTo,
+              sourceHandle: null,
+              targetHandle: null,
+            });
+            setConnectFrom("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setConnectFrom("");
+              wrapper.current?.focus();
+            }
+          }}
+        >
+          <div>
+            <strong>Connect item</strong>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Cancel connection"
+              onClick={() => {
+                setConnectFrom("");
+                wrapper.current?.focus();
+              }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <p>{project.cards.find((c) => c.id === connectFrom)?.title}</p>
+          <label>
+            Connect to
+            <select
+              ref={connectionTarget}
+              aria-label="Connect to"
+              required
+              value={connectTo}
+              onChange={(e) => setConnectTo(e.target.value)}
+            >
+              <option value="">Choose a board item</option>
+              {project.cards
+                .filter((c) => c.id !== connectFrom)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <button className="button primary" disabled={!connectTo}>
+            Connect items
+          </button>
+        </form>
+      )}
       {project.cards.length === 0 && (
         <div className="board-empty">
           <div className="empty-orbit">
@@ -358,7 +630,7 @@ function Board(props: Props) {
 }
 export default function Collector(props: Props) {
   return (
-    <ReactFlowProvider>
+    <ReactFlowProvider key={props.project.id}>
       <Board {...props} />
     </ReactFlowProvider>
   );

@@ -135,7 +135,7 @@ test("editable report tables export with evidence bibliography to Markdown, DOCX
       .getByRole("button", { name: "Save revision", exact: true })
       .click();
     await expect(page.locator(".release-messages")).toContainText(
-      "Revision saved",
+      "Revision and analytical pedigree saved",
     );
     const markdownPath = join(directory, "pilot.md");
     await stubSave(app, markdownPath);
@@ -456,6 +456,7 @@ test("failed generation identifies the retained report and hides IPC error wrapp
         );
       });
     });
+    await page.getByRole("button", { name: "New report", exact: true }).click();
     await page
       .getByRole("button", { name: "Build evidence brief", exact: true })
       .click();
@@ -480,6 +481,295 @@ test("failed generation identifies the retained report and hides IPC error wrapp
     ).toEqual(original);
   } finally {
     await app.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("report workspace restores writing context and flushes immediate edits without changing released content", async ({}, testInfo) => {
+  const { app, page, directory } = await launch();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  try {
+    await seed(page);
+    await page.getByRole("tab", { name: /Releaser/ }).click();
+    const composer = page.locator("dialog.release-composer");
+    await expect(composer).toBeVisible();
+    await page
+      .getByRole("button", { name: "Build evidence brief", exact: true })
+      .click();
+    await expect(page.locator(".report-tiptap")).toContainText("12%");
+    await expect(composer).not.toBeVisible();
+    await expect(
+      page.getByRole("complementary", { name: "Saved outputs and evidence" }),
+    ).not.toBeVisible();
+    await page
+      .getByRole("button", { name: "Save & release", exact: true })
+      .click();
+  await page.getByRole("button", { name: /Release with limitations|Release reviewed revision/, exact: true }).click();
+    await expect(page.locator(".release-messages")).toContainText(
+      "The reviewed snapshot is now released",
+    );
+    const released = await page.evaluate(async () => {
+      const project = (await window.acadia!.load()).project;
+      const output = project.outputs.find(
+        (o) => o.id === project.releasedOutputId,
+      )!;
+      return output.revisions!.find((r) => r.id === output.releasedRevisionId)!;
+    });
+
+    await page.getByRole("button", { name: "New report", exact: true }).click();
+    await page
+      .locator("#release-instructions")
+      .fill("Compare the cost assumptions before the next review.");
+    await page
+      .getByRole("button", { name: "Close new report", exact: true })
+      .click();
+    await page.locator(".report-tiptap").click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.insertText("Immediate private draft edit.");
+    // Switching immediately exercises cleanup while derived Markdown is pending.
+    await page.getByRole("tab", { name: /Collector/ }).click();
+    await page.getByRole("tab", { name: /Releaser/ }).click();
+    await expect(page.locator(".report-tiptap")).toContainText(
+      "Immediate private draft edit.",
+    );
+    await expect(composer).not.toBeVisible();
+    await page.getByRole("button", { name: "New report", exact: true }).click();
+    await expect(page.locator("#release-instructions")).toHaveValue(
+      "Compare the cost assumptions before the next review.",
+    );
+    await page
+      .getByRole("button", { name: "Close new report", exact: true })
+      .click();
+    await page.locator(".report-tiptap").click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.insertText(" Native undo marker.");
+    await page.evaluate(() =>
+      window.dispatchEvent(
+        new CustomEvent("acadia:editor-command", { detail: "undo" }),
+      ),
+    );
+    await expect(page.locator(".report-tiptap")).not.toContainText(
+      "Native undo marker.",
+    );
+    await page.evaluate(() =>
+      window.dispatchEvent(
+        new CustomEvent("acadia:editor-command", { detail: "redo" }),
+      ),
+    );
+    await expect(page.locator(".report-tiptap")).toContainText(
+      "Native undo marker.",
+    );
+    await page
+      .getByRole("button", { name: "Save revision", exact: true })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async () =>
+            (await window.acadia!.load()).project.outputs[0].revisions!.length,
+        ),
+      )
+      .toBe(2);
+    const latestRevision = await page.evaluate(
+      async () =>
+        (await window.acadia!.load()).project.outputs[0].revisions!.at(-1)!.id,
+    );
+    await page
+      .getByRole("combobox", { name: "Report version", exact: true })
+      .selectOption(latestRevision);
+    await page
+      .getByRole("button", { name: "Reports and evidence", exact: true })
+      .click();
+    await expect(
+      page.getByRole("complementary", { name: "Saved outputs and evidence" }),
+    ).toBeVisible();
+    const scroll = await page
+      .locator(".release-document-scroll")
+      .evaluate((element) => {
+        element.scrollTop = 280;
+        return element.scrollTop;
+      });
+    expect(scroll).toBeGreaterThan(100);
+    await page.getByRole("tab", { name: /Collector/ }).click();
+    await page.getByRole("tab", { name: /Releaser/ }).click();
+    await expect(
+      page.getByRole("combobox", { name: "Report version", exact: true }),
+    ).toHaveValue(latestRevision);
+    await expect(
+      page.getByRole("complementary", { name: "Saved outputs and evidence" }),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        page
+          .locator(".release-document-scroll")
+          .evaluate((element) => element.scrollTop),
+      )
+      .toBe(scroll);
+    await expect(page.locator(".release-document-kicker")).toContainText(
+      "SAVED REVISION",
+    );
+    await page
+      .getByRole("combobox", { name: "Report version", exact: true })
+      .selectOption("");
+    await page.reload();
+    await expect(page.locator(".report-tiptap")).toContainText(
+      "Immediate private draft edit.",
+    );
+    const persisted = await page.evaluate(
+      async () => (await window.acadia!.load()).project.outputs[0],
+    );
+    expect(persisted.markdown).toContain("Immediate private draft edit.");
+    expect(persisted.revisions!.find((r) => r.id === released.id)).toEqual(
+      released,
+    );
+    expect(errors).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath("report-writing-workspace.png"),
+      fullPage: true,
+    });
+  } finally {
+    await app.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("slow report generation survives Collector navigation and cannot be duplicated after returning", async () => {
+  const { app, page, directory } = await launch();
+  let server: Server | undefined;
+  let finishDraft = () => {};
+  const draftGate = new Promise<void>((resolve) => {
+    finishDraft = resolve;
+  });
+  let draftRequests = 0;
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  try {
+    server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      const input = JSON.parse(
+        body.messages.find(
+          (message: { role: string }) => message.role === "user",
+        ).content,
+      );
+      let content: string;
+      if (!input.source_passages) {
+        content = JSON.stringify({
+          support: ["pilot reliability"],
+          counter: [],
+          gaps: [],
+        });
+      } else {
+        draftRequests++;
+        const source = input.source_passages[0];
+        await draftGate;
+        content = JSON.stringify({
+          markdown: `# Navigation report\n\nThe pilot improved reliability by 12% [${source.label}].`,
+          citations: [
+            {
+              label: source.label,
+              passageId: source.passageId,
+              quote: "The pilot improved reliability by 12%.",
+            },
+          ],
+        });
+      }
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ message: { content } }));
+    });
+    await new Promise<void>((resolve) =>
+      server!.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("No local test model port");
+    await seed(page);
+    const projectIds = await page.evaluate(async () => {
+      const original = (await window.acadia!.load()).project.id;
+      const other = (await window.acadia!.newProject()).project.id;
+      await window.acadia!.switchProject(original);
+      return { original, other };
+    });
+    await page.evaluate(async (port) => {
+      const { project } = await window.acadia!.load();
+      project.privacy = {
+        mode: "local",
+        provider: "ollama",
+        endpoint: `http://127.0.0.1:${port}`,
+        model: "navigation-test-model",
+      };
+      await window.acadia!.saveSettings({
+        provider: "ollama",
+        endpoint: `http://127.0.0.1:${port}`,
+        model: "navigation-test-model",
+      });
+      await window.acadia!.save(project);
+    }, address.port);
+    await page.reload();
+    await page.getByRole("tab", { name: /Releaser/ }).click();
+    await page
+      .getByRole("button", { name: "Generate document", exact: true })
+      .click();
+    await expect.poll(() => draftRequests).toBe(1);
+    const attemptedSwitch = await page.evaluate(async (ids) => {
+      const failures: string[] = [];
+      for (const operation of [
+        () => window.acadia!.switchProject(ids.other),
+        () => window.acadia!.newProject(),
+      ]) {
+        try {
+          await operation();
+          failures.push("Unexpectedly switched investigation");
+        } catch (error) {
+          failures.push(String(error));
+        }
+      }
+      return { failures, current: (await window.acadia!.load()).project.id };
+    }, projectIds);
+    expect(attemptedSwitch.failures).toHaveLength(2);
+    for (const message of attemptedSwitch.failures)
+      expect(message).toMatch(/wait.*cancel|cancel.*wait/i);
+    expect(attemptedSwitch.current).toBe(projectIds.original);
+    await page
+      .getByRole("button", { name: "Close new report", exact: true })
+      .click();
+    await page.getByRole("tab", { name: /Collector/ }).click();
+    await page.getByRole("tab", { name: /Releaser/ }).click();
+    await expect(page.locator(".release-generate")).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Cancel analysis", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Close new report", exact: true })
+      .click();
+    await page.getByRole("tab", { name: /Collector/ }).click();
+    finishDraft();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async () => (await window.acadia!.load()).project.outputs.length,
+        ),
+      )
+      .toBe(1);
+    await page.getByRole("tab", { name: /Releaser/ }).click();
+    await expect(page.locator(".report-tiptap")).toContainText(
+      "Navigation report",
+    );
+    await expect(page.locator("dialog.release-composer")).not.toBeVisible();
+    await page.reload();
+    await expect(page.locator(".report-tiptap")).toContainText(
+      "Navigation report",
+    );
+    expect(draftRequests).toBe(1);
+    expect(errors).toEqual([]);
+  } finally {
+    finishDraft();
+    await app.close();
+    if (server)
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
   }
 });

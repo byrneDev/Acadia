@@ -215,12 +215,12 @@ jobs:
 
           ### Included in this release
 
-          - A local project library with connected research boards, immutable source versions, searchable passages, evidence assessments, and gap-linked tasks.
-          - PDF, Word, text, and public web capture; bundled English OCR for scanned material.
-          - Optional local or explicitly configured cloud AI, passage citations, and separately approved Brave discovery.
-          - Editable decision briefs, hypotheses, research plans, whitepapers, gap analyses, and needs analyses with DOCX, PDF, and Markdown exports.
-          - Saved report revisions and an isolated second display that follows the explicitly released report.
-          - The approved Acadia branding, MIT license, contributor documentation, and reproducible native release checks.
+          - A smoother native desktop workspace with system/light/dark appearance, density controls, platform menus and shortcuts, command search, and a focused source reader and report editor.
+          - Versioned research briefs, exact-version source appraisals, shared-origin review, finding assessments and assumptions; supporting evidence, contradictions and unassessed independence remain distinct.
+          - Five editable methods: competing hypotheses, SWOT, root causes, risk and technology readiness, with linked evidence and follow-up tasks.
+          - Explicit AI challenge proposals, balanced retrieval/audit records, quotation checks and frozen report pedigree. Review proposals before applying them; citation validity does not establish claim support.
+          - Deliverable project plans with editable work packages and local Monday/Jira/Planner handoffs, plus linked Power BI tables and import guidance.
+          - Portable project format v3 with recovery backups and v1/v2 import support; existing document/OCR, approved web discovery, report exports and private released-display behavior remain available.
 
           ### Downloads and installation
 
@@ -230,9 +230,11 @@ jobs:
 
           ### Validation and limits
 
-          Publication requires type checks, the research/unit suite, and native desktop scenarios against each packaged application on Ubuntu, macOS, and Windows. The workflow verifies the complete distribution and its checksums before uploading.
+          This automated publication path requires type checks, the research/unit suite, and native desktop scenarios against each packaged application on Ubuntu, macOS, and Windows. The workflow verifies the complete distribution and its checksums before uploading. Consult the workflow run for this tag: local cross-built packages and earlier release results do not establish native validation for this build.
 
-          Packages are unsigned; the macOS application is not notarized. See the repository's installation and validation guides. Automated native scenarios include separate output windows and simulated touch; physical multi-monitor and touchscreen checks remain separate.
+          The [v0.4 validation record](https://github.com/byrneDev/Acadia/blob/v0.4.0/docs/VALIDATION-v0.4.md) separates functional tests from the recorded local-model evaluation. In that single synthetic qwen3.5:9b evaluation, the decision brief was accepted; the challenge proposal failed its schema and an abstaining answer failed exact-quotation validation. No general model-accuracy pass is claimed.
+
+          Packages are unsigned; the macOS application is not notarized. Automated native scenarios include separate output windows and simulated touch; physical multi-monitor, touchscreen, mixed-DPI and assistive-technology checks remain separate. Power BI Desktop and live PMIS tenant imports require their own checks; Acadia's exports do not connect to those services automatically.
 
           Acadia remains an early-access 0.x application. Review OCR and AI findings against the sources, and keep project backups. Verify downloads against SHA256SUMS.txt. Local AI models and credentials are not included.
           NOTES

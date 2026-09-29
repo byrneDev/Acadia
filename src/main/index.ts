@@ -4,12 +4,14 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeTheme,
   net,
   protocol,
   safeStorage,
   screen,
   session,
   shell,
+  systemPreferences,
   type IpcMainInvokeEvent,
 } from "electron";
 import { randomUUID, createHash } from "node:crypto";
@@ -50,6 +52,26 @@ import {
   validateProject,
 } from "../shared/project";
 import { resolveAIEndpoint } from "./analysis";
+import {
+  clampWindowBounds,
+  DesktopStore,
+  desktopMenuTemplate,
+  setDesktopMenuEnabled,
+  type WindowKind,
+} from "./desktop";
+import { listLocalModels, testAIConnection } from "./model-connection";
+import type { DesktopCommand, DesktopState } from "../shared/desktop";
+import {
+  PEDIGREE_COLLECTIONS,
+  validatePedigreeEntity,
+  type PedigreeEntityKind,
+} from "../shared/pedigree";
+import type { ChallengeTarget } from "../shared/pedigree-analysis";
+import { validateProjectPlanContext } from "../shared/project";
+import { exportPmisFiles } from "../shared/pmis";
+import { PLANNER_IMPORTER } from "./planner-importer";
+import { citationIntegrity } from "../shared/report-pedigree";
+import { buildPowerBiFiles } from "./powerbi-export";
 
 import {
   MAX_ARCHIVE_BYTES,
@@ -96,6 +118,143 @@ let store: ResearchStore;
 let ingestion: Ingestion;
 let research: ResearchService;
 let searchKey: string | undefined;
+let desktop: DesktopStore;
+const windowSavers = new Map<BrowserWindow, () => void>();
+
+function assertProjectTransitionAllowed(): void {
+  if (generating)
+    throw new Error(
+      "Wait for report generation to finish, or cancel it in the activity strip, before changing investigations.",
+    );
+}
+
+function desktopState(): DesktopState {
+  let reducedMotion = false;
+  try {
+    reducedMotion =
+      systemPreferences.getAnimationSettings().prefersReducedMotion;
+  } catch {}
+  return {
+    preferences: desktop.preferences,
+    appearance: {
+      platform:
+        process.platform === "darwin" || process.platform === "win32"
+          ? process.platform
+          : "linux",
+      theme: nativeTheme.shouldUseDarkColors ? "dark" : "light",
+      highContrast: nativeTheme.shouldUseHighContrastColors,
+      reducedMotion,
+    },
+  };
+}
+
+function desktopChanged(): void {
+  const state = desktopState();
+  for (const window of [collector, releaser]) {
+    if (!window || window.isDestroyed()) continue;
+    window.setBackgroundColor(
+      state.appearance.theme === "dark" ? "#111510" : "#f7f8f5",
+    );
+    window.webContents.send("acadia:desktop-changed", state);
+  }
+}
+
+function sendDesktopCommand(command: DesktopCommand): void {
+  // Presentation windows never acquire editing commands or a private workspace payload.
+  if (
+    !collector ||
+    collector.isDestroyed() ||
+    BrowserWindow.getFocusedWindow() !== collector
+  )
+    return;
+  collector.webContents.send("acadia:command", command);
+}
+
+function refreshDesktopMenu(): void {
+  const editable = Boolean(
+    collector &&
+    !collector.isDestroyed() &&
+    BrowserWindow.getFocusedWindow() === collector,
+  );
+  const menu = Menu.getApplicationMenu();
+  if (menu) setDesktopMenuEnabled(menu, editable);
+}
+
+function connectedWorkAreas() {
+  const primary = screen.getPrimaryDisplay();
+  return [
+    primary,
+    ...screen.getAllDisplays().filter((display) => display.id !== primary.id),
+  ].map((display) => display.workArea);
+}
+
+function trackWindow(window: BrowserWindow, kind: WindowKind): void {
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  const save = () => {
+    if (pending) clearTimeout(pending);
+    pending = undefined;
+    if (window.isDestroyed() || window.isMinimized()) return;
+    void desktop
+      .saveWindow(kind, {
+        bounds: window.getNormalBounds(),
+        maximized: window.isMaximized(),
+      })
+      .catch(() => undefined);
+  };
+  const schedule = () => {
+    if (pending) clearTimeout(pending);
+    pending = setTimeout(save, 200);
+  };
+  windowSavers.set(window, save);
+  window.on("move", schedule);
+  window.on("resize", schedule);
+  window.on("maximize", schedule);
+  window.on("unmaximize", schedule);
+  window.on("close", save);
+  window.on("focus", desktopChanged);
+  window.on("focus", refreshDesktopMenu);
+  window.on("blur", refreshDesktopMenu);
+  window.once("closed", () => {
+    if (pending) clearTimeout(pending);
+    windowSavers.delete(window);
+    refreshDesktopMenu();
+  });
+}
+
+function recoverDisplayWindows(): void {
+  for (const window of [collector, releaser]) {
+    if (!window || window.isDestroyed()) continue;
+    const previous = window.getNormalBounds();
+    const bounds = clampWindowBounds(previous, connectedWorkAreas(), {
+      width: window === collector ? 960 : 800,
+      height: 700,
+    });
+    if (
+      ["x", "y", "width", "height"].every(
+        (key) =>
+          previous[key as keyof typeof previous] ===
+          bounds[key as keyof typeof bounds],
+      )
+    )
+      continue;
+    const restore = () => {
+      if (window.isDestroyed()) return;
+      const maximized = window.isMaximized();
+      if (maximized) window.unmaximize();
+      window.setMinimumSize(
+        Math.min(window === collector ? 960 : 800, bounds.width),
+        Math.min(700, bounds.height),
+      );
+      window.setBounds(bounds);
+      if (maximized) window.maximize();
+      windowSavers.get(window)?.();
+    };
+    if (window.isFullScreen()) {
+      window.once("leave-full-screen", restore);
+      window.setFullScreen(false);
+    } else restore();
+  }
+}
 const extracting = new Set<string>();
 function researchChanged() {
   for (const win of [collector, releaser])
@@ -133,6 +292,7 @@ function releasedProject(project: Project): Project {
           markdown: release.revision.markdown,
           document: release.revision.document,
           citations: release.revision.citations,
+          deliveryPlan: release.revision.deliveryPlan,
           createdAt: release.revision.createdAt,
           provider: /offline/i.test(release.output.provider)
             ? "Offline evidence brief"
@@ -153,6 +313,7 @@ function releasedProject(project: Project): Project {
               document: release.revision.document,
               markdown: release.revision.markdown,
               citations: release.revision.citations,
+              deliveryPlan: release.revision.deliveryPlan,
               note: "",
             },
           ],
@@ -304,6 +465,7 @@ const startupWarnings: string[] = [];
 const RENDERER_FILE = join(__dirname, "../renderer/index.html");
 const RENDERER_URL = process.env.ELECTRON_RENDERER_URL;
 const OUTPUT_KINDS: OutputKind[] = [
+  "project-plan",
   "decision-brief",
   "hypothesis",
   "research-plan",
@@ -397,6 +559,76 @@ async function persistProject(
       );
   }
   researchChanged();
+}
+
+function validateReportSave(project: Project): void {
+  const previous = store.getProject(project.id);
+  for (const output of project.outputs) {
+    const old = previous?.outputs.find((o) => o.id === output.id);
+    if (
+      old?.revisions?.some(
+        (prior) =>
+          !output.revisions?.some((revision) => revision.id === prior.id),
+      )
+    )
+      throw new Error(
+        "This save omitted existing report revisions. Reload the current report before saving; saved history has been preserved.",
+      );
+    for (const revision of output.revisions || []) {
+      const prior = old?.revisions?.find((r) => r.id === revision.id);
+      if (prior && JSON.stringify(prior) !== JSON.stringify(revision))
+        throw new Error(
+          "Saved report revisions are immutable. Save a new revision for changes.",
+        );
+      if (
+        revision.pedigreeSnapshotId &&
+        store.getPedigreeSnapshot(revision.pedigreeSnapshotId).projectId !==
+          project.id
+      )
+        throw new Error("Report pedigree belongs to another investigation.");
+    }
+    if (
+      output.pedigreeSnapshotId &&
+      store.getPedigreeSnapshot(output.pedigreeSnapshotId).projectId !==
+        project.id
+    )
+      throw new Error("Analysis pedigree belongs to another investigation.");
+  }
+  const release = selectedRelease(project),
+    prior = previous && selectedRelease(previous);
+  if (
+    release &&
+    (!prior ||
+      prior.revision.id !== release.revision.id ||
+      prior.output.id !== release.output.id)
+  ) {
+    const frozen = {
+      ...release.output,
+      document: release.revision.document,
+      markdown: release.revision.markdown,
+      citations: release.revision.citations,
+    };
+    const errors = citationIntegrity(frozen, (id) => {
+      try {
+        const passage = store.getPassage(id);
+        return store.getSource(passage.sourceId).source.projectId === project.id
+          ? passage
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    });
+    if (errors.length)
+      throw new Error(
+        `Cannot release a report with citation integrity errors. ${errors.join(" ")}`,
+      );
+    // Legacy archives may contain historical releases without pedigree. New releases
+    // must deliberately freeze the current review context instead of inventing it.
+    if (!release.revision.pedigreeSnapshotId)
+      throw new Error(
+        "Review and freeze the report pedigree before releasing this revision.",
+      );
+  }
 }
 
 async function persistAssets(next: Record<string, AssetRecord>): Promise<void> {
@@ -598,22 +830,21 @@ function createWindow(isReleaser = false, displayId?: number): BrowserWindow {
   const display = screen
     .getAllDisplays()
     .find((entry) => entry.id === displayId);
-  const options = display
-    ? {
-        x: display.workArea.x + 30,
-        y: display.workArea.y + 30,
-        width: Math.min(1600, display.workArea.width - 60),
-        height: Math.min(1000, display.workArea.height - 60),
-      }
-    : { width: 1600, height: 1000 };
+  const kind = isReleaser ? "releaser" : "collector";
+  const saved = display ? undefined : desktop.window(kind);
+  const options = clampWindowBounds(
+    saved?.bounds,
+    display ? [display.workArea] : connectedWorkAreas(),
+    { width: isReleaser ? 800 : 960, height: 700 },
+  );
   const window = new BrowserWindow({
     ...options,
-    minWidth: isReleaser ? 800 : 960,
-    minHeight: 700,
+    minWidth: Math.min(isReleaser ? 800 : 960, options.width),
+    minHeight: Math.min(700, options.height),
     title: isReleaser ? "Acadia — Releaser" : "Acadia — Collector",
-    backgroundColor: "#070b13",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#111510" : "#f7f8f5",
     show: false,
-    autoHideMenuBar: true,
+    autoHideMenuBar: isReleaser,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -624,6 +855,7 @@ function createWindow(isReleaser = false, displayId?: number): BrowserWindow {
     },
   });
   secureWindow(window);
+  trackWindow(window, kind);
   const hash = isReleaser ? "releaser" : "";
   if (RENDERER_URL) {
     const url = new URL(RENDERER_URL);
@@ -632,7 +864,10 @@ function createWindow(isReleaser = false, displayId?: number): BrowserWindow {
   } else {
     void window.loadFile(RENDERER_FILE, { hash });
   }
-  window.once("ready-to-show", () => window.show());
+  window.once("ready-to-show", () => {
+    if (saved?.maximized) window.maximize();
+    window.show();
+  });
   if (isReleaser)
     window.on("closed", () => {
       if (releaser === window) releaser = null;
@@ -669,15 +904,13 @@ function createWindow(isReleaser = false, displayId?: number): BrowserWindow {
 function registerAssetProtocol(): void {
   // A citation grants access to its released passages, not the original attachment.
   // A separate session prevents guessed asset URLs from bypassing the read IPC checks.
-  session
-    .fromPartition("acadia-releaser")
-    .protocol.handle(
-      "acadia-asset",
-      () =>
-        new Response("Use the Collector to open original attachments.", {
-          status: 403,
-        }),
-    );
+  session.fromPartition("acadia-releaser").protocol.handle(
+    "acadia-asset",
+    () =>
+      new Response("Use the Collector to open original attachments.", {
+        status: 403,
+      }),
+  );
   protocol.handle("acadia-asset", async (request) => {
     try {
       const url = new URL(request.url);
@@ -766,6 +999,7 @@ async function importPaths(paths: unknown): Promise<ImportedAsset[]> {
 }
 
 async function openArchive(path: string): Promise<WorkspaceState> {
+  assertProjectTransitionAllowed();
   const info = await stat(path);
   if (info.size > MAX_ARCHIVE_BYTES)
     throw new Error("This project exceeds the 1 GB portable-project limit.");
@@ -814,8 +1048,12 @@ async function openArchive(path: string): Promise<WorkspaceState> {
         project.id,
       )
     : undefined;
-  if (project.schemaVersion === 2 && !archivedResearch)
-    throw new Error("Version 2 projects require their research records.");
+  if (project.schemaVersion >= 2 && !archivedResearch)
+    throw new Error("Portable projects require their research records.");
+  if (project.schemaVersion === 3 && archivedResearch?.schemaVersion !== 3)
+    throw new Error(
+      "Version 3 projects require version 3 research records; use Acadia 0.4 or later.",
+    );
   const manifest = JSON.parse(
     manifestEntry.getData().toString("utf8"),
   ) as unknown;
@@ -950,7 +1188,7 @@ async function portableArchive(project: Project): Promise<Buffer> {
   zip.addFile("research.json", Buffer.from(JSON.stringify(records)));
   zip.addFile(
     "project.json",
-    Buffer.from(JSON.stringify({ ...project, schemaVersion: 2 }, null, 2)),
+    Buffer.from(JSON.stringify({ ...project, schemaVersion: 3 }, null, 2)),
   );
   zip.addFile("assets.json", Buffer.from(JSON.stringify(manifest, null, 2)));
   return zip.toBuffer();
@@ -988,6 +1226,37 @@ function validateOutput(value: unknown): ResearchOutput {
 }
 
 function registerIPC(): void {
+  handle("desktop-state", () => desktopState());
+  handle(
+    "save-desktop-preferences",
+    async (_event, patch) => {
+      await desktop.savePreferences(patch);
+      nativeTheme.themeSource = desktop.preferences.theme;
+      desktopChanged();
+      return desktopState();
+    },
+    true,
+  );
+  handle(
+    "native-edit",
+    (event, command) => {
+      const contents = assertSender(event, true).webContents;
+      if (command === "undo") contents.undo();
+      else if (command === "redo") contents.redo();
+      else throw new Error("Unsupported native edit command.");
+    },
+    true,
+  );
+  handle(
+    "list-local-models",
+    (_event, endpoint) => listLocalModels(endpoint),
+    true,
+  );
+  handle(
+    "test-ai-connection",
+    (_event, input) => testAIConnection(validateSettings(input)),
+    true,
+  );
   handle("load", (event) =>
     state(BrowserWindow.fromWebContents(event.sender) === releaser),
   );
@@ -1021,11 +1290,76 @@ function registerIPC(): void {
     researchChanged();
     return value;
   };
+  handle("pedigree-state", () => store.pedigreeState(currentProject.id), true);
+  const pedigreeWriters = {
+    brief: (v: any) => store.saveBrief(v),
+    appraisal: (v: any) => store.saveAppraisal(v),
+    origin: (v: any) => store.saveOrigin(v),
+    finding: (v: any) => store.saveFinding(v),
+    assumption: (v: any) => store.saveAssumption(v),
+    method: (v: any) => store.saveMethod(v),
+    issue: (v: any) => store.saveReviewIssue(v),
+  };
+  for (const kind of Object.keys(pedigreeWriters) as PedigreeEntityKind[])
+    handle(
+      kind === "issue" ? "save-review-issue" : `save-${kind}`,
+      (_event, input) => {
+        const value = validatePedigreeEntity(kind, input, currentProject.id);
+        return changeResearch(() => pedigreeWriters[kind](value));
+      },
+      true,
+    );
+  handle(
+    "pedigree-revisions",
+    (_event, kind, value) => {
+      if (!Object.hasOwn(PEDIGREE_COLLECTIONS, kind))
+        throw new Error("Invalid pedigree record type.");
+      const revisions = store.getPedigreeRevisions(
+        kind as PedigreeEntityKind,
+        id(value),
+      );
+      if (revisions.some((r) => r.projectId !== currentProject.id))
+        throw new Error("Record belongs to another investigation.");
+      return revisions;
+    },
+    true,
+  );
+  handle(
+    "create-pedigree-snapshot",
+    () => store.createPedigreeSnapshot(currentProject.id),
+    true,
+  );
+  handle(
+    "get-pedigree-snapshot",
+    (_event, value) => {
+      const snapshot = store.getPedigreeSnapshot(id(value));
+      if (snapshot.projectId !== currentProject.id)
+        throw new Error("Snapshot belongs to another investigation.");
+      return snapshot;
+    },
+    true,
+  );
+  handle(
+    "challenge-analysis",
+    (_event, input) => {
+      if (!input || !["finding", "method", "report"].includes(input.kind))
+        throw new Error("Choose a finding, method, or report to challenge.");
+      const target: ChallengeTarget = { kind: input.kind, id: id(input.id) };
+      return research.challenge(currentProject, target);
+    },
+    true,
+  );
+  handle(
+    "assist-method",
+    (_event, value) => research.assistMethod(currentProject, id(value)),
+    true,
+  );
   handle("list-projects", () => store.listProjects(), true);
   handle(
     "switch-project",
     (_event, value) =>
       queued(async () => {
+        assertProjectTransitionAllowed();
         const project = store.getProject(id(value));
         if (!project) throw new Error("Project not found.");
         await persistProject(project, null);
@@ -1146,6 +1480,17 @@ function registerIPC(): void {
       if (!Array.isArray(task.sourceIds))
         throw new Error("Invalid task sources.");
       task.sourceIds.forEach(ownSource);
+      const pedigree = store.pedigreeState(currentProject.id);
+      if (
+        task.assumptionId &&
+        !pedigree.assumptions.some((a) => a.id === task.assumptionId)
+      )
+        throw new Error("Missing linked assumption.");
+      if (
+        task.methodId &&
+        !pedigree.methods.some((m) => m.id === task.methodId)
+      )
+        throw new Error("Missing linked method.");
       if (
         task.claimId &&
         !store
@@ -1268,6 +1613,7 @@ function registerIPC(): void {
             throw new Error(
               `The attachment for “${card.title}” is unavailable.`,
             );
+        validateReportSave(project);
         await persistProject(project);
         return { savedAt: new Date().toISOString() };
       }),
@@ -1277,6 +1623,7 @@ function registerIPC(): void {
     "new-project",
     () =>
       queued(async () => {
+        assertProjectTransitionAllowed();
         await createRecovery();
         const project = createBlankProject();
         await persistProject(project, null);
@@ -1287,6 +1634,7 @@ function registerIPC(): void {
   handle(
     "open-project",
     async (event) => {
+      assertProjectTransitionAllowed();
       const result = await dialog.showOpenDialog(assertSender(event, true), {
         title: "Open Acadia project or recover a previous board",
         defaultPath: join(storageRoot, "recovery"),
@@ -1312,6 +1660,7 @@ function registerIPC(): void {
       return queued(async () => {
         if (project.id !== currentProject.id)
           throw new Error("Project changed before export.");
+        validateReportSave(project);
         await persistProject(project);
         await atomicWrite(
           result.filePath!,
@@ -1459,7 +1808,13 @@ function registerIPC(): void {
   );
   handle(
     "generate",
-    async (_event, input: unknown, kind: unknown, instructions: unknown) => {
+    async (
+      _event,
+      input: unknown,
+      kind: unknown,
+      instructions: unknown,
+      planInput: unknown,
+    ) => {
       const project = validateProject(input);
       if (!OUTPUT_KINDS.includes(kind as OutputKind))
         throw new Error("Choose a supported research output.");
@@ -1470,11 +1825,19 @@ function registerIPC(): void {
       try {
         if (project.id !== currentProject.id)
           throw new Error("Project changed before analysis.");
-        await queued(() => persistProject(project));
+        await queued(() => {
+          if (project.id !== currentProject.id)
+            throw new Error("Project changed before analysis.");
+          validateReportSave(project);
+          return persistProject(project);
+        });
         return await research.analyze(
           currentProject,
           kind as OutputKind,
           instructions,
+          planInput === undefined
+            ? undefined
+            : validateProjectPlanContext(planInput),
         );
       } finally {
         generating = false;
@@ -1532,6 +1895,59 @@ function registerIPC(): void {
     }
     return result.filePath;
   });
+  handle(
+    "export-project-plan",
+    async (event, value: unknown) => {
+      const output = validateOutput(value);
+      if (!output.deliveryPlan)
+        throw new Error(
+          "Prepare and review the work packages before exporting to a PMIS.",
+        );
+      const files = exportPmisFiles(output.deliveryPlan);
+      const result = await dialog.showSaveDialog(assertSender(event, true), {
+        title: "Export PMIS handoff",
+        defaultPath: `${safeFileName(output.title)}-PMIS.zip`,
+        filters: [{ name: "PMIS import package", extensions: ["zip"] }],
+      });
+      if (result.canceled || !result.filePath) return null;
+      const zip = new AdmZip();
+      for (const [name, contents] of Object.entries(files))
+        zip.addFile(name, Buffer.from(contents));
+      zip.addFile("Import-Planner.ps1", Buffer.from(PLANNER_IMPORTER));
+      zip.addFile(
+        "research-report.md",
+        Buffer.from(exportReportMarkdown(output)),
+      );
+      await atomicWrite(result.filePath, zip.toBuffer());
+      return result.filePath;
+    },
+    true,
+  );
+  handle(
+    "export-power-bi",
+    async (event) => {
+      const project = currentProject;
+      const records = store.exportResearch(project.id);
+      const files = buildPowerBiFiles(
+        project,
+        store.state(project.id),
+        store.pedigreeState(project.id),
+        records.passages,
+      );
+      const result = await dialog.showSaveDialog(assertSender(event, true), {
+        title: "Export research data for Power BI",
+        defaultPath: `${safeFileName(project.title)}-PowerBI.zip`,
+        filters: [{ name: "Power BI data package", extensions: ["zip"] }],
+      });
+      if (result.canceled || !result.filePath) return null;
+      const zip = new AdmZip();
+      for (const [name, value] of Object.entries(files))
+        zip.addFile(name, Buffer.from(value));
+      await atomicWrite(result.filePath, zip.toBuffer());
+      return result.filePath;
+    },
+    true,
+  );
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -1547,49 +1963,25 @@ else {
     .whenReady()
     .then(async () => {
       app.setName("Acadia");
-      // Prevent Electron's default menus from navigating the two presentation windows.
+      desktop = new DesktopStore(app.getPath("userData"));
+      await desktop.load();
+      nativeTheme.themeSource = desktop.preferences.theme;
+      nativeTheme.on("updated", desktopChanged);
+      app.on("accessibility-support-changed", desktopChanged);
       Menu.setApplicationMenu(
-        process.platform === "darwin"
-          ? Menu.buildFromTemplate([
-              {
-                label: "Acadia",
-                submenu: [
-                  { role: "about" },
-                  { type: "separator" },
-                  { role: "hide" },
-                  { role: "hideOthers" },
-                  { role: "unhide" },
-                  { type: "separator" },
-                  { role: "quit" },
-                ],
-              },
-              {
-                label: "Edit",
-                submenu: [
-                  { role: "undo" },
-                  { role: "redo" },
-                  { type: "separator" },
-                  { role: "cut" },
-                  { role: "copy" },
-                  { role: "paste" },
-                  { role: "selectAll" },
-                ],
-              },
-              {
-                label: "Window",
-                submenu: [
-                  { role: "minimize" },
-                  { role: "zoom" },
-                  { role: "togglefullscreen" },
-                ],
-              },
-            ])
-          : null,
+        Menu.buildFromTemplate(
+          desktopMenuTemplate(
+            desktopState().appearance.platform,
+            sendDesktopCommand,
+          ),
+        ),
       );
       await initializeStorage();
       registerAssetProtocol();
       registerIPC();
       collector = createWindow();
+      screen.on("display-removed", recoverDisplayWindows);
+      screen.on("display-metrics-changed", recoverDisplayWindows);
       if (startupWarnings.length)
         void dialog.showMessageBox(collector, {
           type: "warning",
@@ -1620,6 +2012,9 @@ else {
       return;
     }
     closing = true;
-    void mutationQueue.finally(() => app.quit());
+    for (const save of windowSavers.values()) save();
+    void Promise.allSettled([mutationQueue, desktop?.flush()]).finally(() =>
+      app.quit(),
+    );
   });
 }

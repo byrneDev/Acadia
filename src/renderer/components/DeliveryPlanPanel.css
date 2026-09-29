@@ -1,0 +1,53 @@
+.delivery-plan-panel {
+  margin: 24px 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+}
+.delivery-plan-panel h3 {
+  margin-top: 0;
+}
+.delivery-actions,
+.delivery-fields-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.delivery-fields-row > .field {
+  flex: 1;
+  min-width: 130px;
+}
+.delivery-packages-editor {
+  max-height: 62vh;
+  overflow: auto;
+  padding: 4px 8px 16px;
+}
+.delivery-work-package {
+  border: 1px solid var(--line);
+  padding: 14px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.delivery-work-package summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 4px 0;
+}
+.delivery-work-package select[multiple] {
+  min-height: 110px;
+}
+.delivery-plan-fields {
+  border: 1px solid var(--line);
+  padding: 14px;
+  border-radius: 8px;
+  margin: 16px 0;
+}
+.delivery-plan-fields legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+.delivery-plan-fields .field {
+  margin-top: 12px;
+}

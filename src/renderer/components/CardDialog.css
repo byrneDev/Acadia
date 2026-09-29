@@ -1,0 +1,101 @@
+.collector-add-form {
+  display: grid;
+  grid-template-columns: 235px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.collector-add-form fieldset,
+.collector-add-details {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.collector-add-options {
+  border-right: 1px solid var(--line);
+  padding-right: 20px;
+}
+.collector-add-options legend {
+  padding: 0;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.collector-add-options .kind-picker {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 20px;
+}
+.collector-add-options .kind-picker button {
+  flex-direction: row;
+  justify-content: flex-start;
+  padding: 10px;
+  min-height: 44px;
+  gap: 7px;
+}
+.collector-method-picker {
+  display: grid;
+  gap: 6px;
+}
+.collector-method-picker button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+}
+.collector-method-picker button svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.collector-method-picker button.active {
+  color: var(--phosphor);
+  border-color: var(--phosphor);
+  background: var(--accent-surface);
+}
+.collector-method-picker button:hover,
+.collector-add-options .kind-picker button:hover {
+  background: var(--panel-lift);
+}
+.collector-add-options .collector-import {
+  margin-top: 20px;
+  justify-content: flex-start;
+  width: 100%;
+}
+.collector-import-note {
+  margin: 7px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.collector-method-description {
+  margin-bottom: 20px;
+}
+.collector-method-description h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.collector-method-description p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 8px;
+}
+@media (max-width: 650px) {
+  .collector-add-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .collector-add-options {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 0 0 18px;
+  }
+  .collector-method-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

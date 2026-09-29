@@ -1,21 +1,29 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Project, ResearchCard, Connection } from "../../shared/types";
 import type {
-  Citation,
-  SourceDetail,
-  Passage,
   ResearchState,
   ResearchClaim,
   ResearchTask,
   ResearchAnswer,
   DiscoveryPlan,
   ConnectionSuggestion,
-  Inclusion,
   ProjectSummary,
   SearchHit,
 } from "../../shared/research";
 import { Modal } from "./Dialogs";
 import "./ResearchWorkspace.css";
+import { Policy } from "./SourceReader";
+import { subscribeResearch } from "./researchSubscription";
+import {
+  AssumptionRegister,
+  FindingAssessmentPanel,
+  OriginSummary,
+} from "./PedigreeWorkspace";
+import {
+  readResearchTextDraft,
+  saveResearchTextDraft,
+} from "./workspaceViewState";
+export { SourceReader } from "./SourceReader";
 const api = () => window.acadia!;
 const now = () => new Date().toISOString();
 const empty: ResearchState = {
@@ -28,25 +36,20 @@ const empty: ResearchState = {
   runs: [],
 };
 export type ResearchView =
-  "board" | "sources" | "evidence" | "tasks" | "inquiry" | "discovery";
+  | "board"
+  | "sources"
+  | "evidence"
+  | "tasks"
+  | "inquiry"
+  | "discovery"
+  | "brief"
+  | "methods";
 export function useResearch(projectId?: string) {
   const [research, setResearch] = useState<ResearchState>(empty);
   useEffect(() => {
-    let alive = true;
-    const refresh = () =>
-      api()
-        .researchState()
-        .then((s) => {
-          if (alive) setResearch(s);
-        })
-        .catch(() => {});
     setResearch(empty);
-    void refresh();
-    const off = api().onResearchChanged(refresh);
-    return () => {
-      alive = false;
-      off();
-    };
+    if (!projectId) return;
+    return subscribeResearch(projectId, setResearch);
   }, [projectId]);
   return research;
 }
@@ -164,374 +167,6 @@ export function ProjectLibrary({
     </Modal>
   );
 }
-export function SourceReader({
-  sourceId,
-  versionId,
-  passageId,
-  research,
-  project,
-  onClose,
-  onError,
-  onBoard,
-  readOnly = false,
-}: {
-  sourceId: string;
-  versionId?: string;
-  passageId?: string;
-  research: ResearchState;
-  project: Project;
-  onClose: () => void;
-  onError: (e: unknown) => void;
-  onBoard?: (card: Partial<ResearchCard>) => void;
-  readOnly?: boolean;
-}) {
-  const [detail, setDetail] = useState<SourceDetail>();
-  const [version, setVersion] = useState(versionId);
-  const [selection, setSelection] = useState<{
-    passage: Passage;
-    quote: string;
-  }>();
-  const [claimId, setClaimId] = useState("");
-  const [title, setTitle] = useState("");
-  const [relation, setRelation] = useState<
-    "supports" | "contradicts" | "context"
-  >("supports");
-  const [rationale, setRationale] = useState("");
-  const [notice, setNotice] = useState("");
-  const body = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    let alive = true;
-    api()
-      .getSource(sourceId, version)
-      .then((d) => {
-        if (alive) setDetail(d);
-      })
-      .catch(onError);
-    return () => {
-      alive = false;
-    };
-  }, [sourceId, version, research.versions]);
-  useEffect(() => {
-    if (passageId && detail)
-      requestAnimationFrame(() =>
-        document
-          .getElementById(`passage-${passageId}`)
-          ?.scrollIntoView({ block: "center" }),
-      );
-  }, [detail, passageId]);
-  const v = detail?.versions.find(
-    (v) => v.id === (version || detail.source.currentVersionId),
-  );
-  async function saveEvidence() {
-    if (!selection) return;
-    const existing = research.claims.find((c) => c.id === claimId);
-    if (!existing && !title.trim()) return;
-    const claim: ResearchClaim = existing
-      ? { ...existing, links: [...existing.links] }
-      : {
-          id: crypto.randomUUID(),
-          projectId: project.id,
-          title: title.trim(),
-          question: project.question,
-          status: "unreviewed",
-          alternatives: "",
-          limitations: "",
-          links: [],
-          updatedAt: now(),
-        };
-    claim.links.push({
-      id: crypto.randomUUID(),
-      passageId: selection.passage.id,
-      quote: selection.quote,
-      relation,
-      rationale,
-    });
-    claim.updatedAt = now();
-    try {
-      await api().saveClaim(claim);
-      setSelection(undefined);
-      setNotice("Passage linked to evidence.");
-    } catch (e) {
-      onError(e);
-    }
-  }
-  return (
-    <Modal
-      title={detail?.source.title || "Loading source…"}
-      subtitle="Immutable source version · passage reader"
-      onClose={onClose}
-      wide
-    >
-      <div className="source-reader" ref={body}>
-        {detail && (
-          <>
-            <div className="reader-controls">
-              <label>
-                Version
-                <select
-                  aria-label="Source version"
-                  value={version || detail.source.currentVersionId}
-                  onChange={(e) => setVersion(e.target.value)}
-                >
-                  {detail.versions.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {new Date(v.acquiredAt).toLocaleString()} · {v.method} ·{" "}
-                      {v.status}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {!readOnly && (
-                <label>
-                  Source use
-                  <Policy
-                    value={detail.source.inclusion}
-                    label="Source inclusion"
-                    onChange={(p) =>
-                      api().setSourcePolicy(sourceId, p).catch(onError)
-                    }
-                  />
-                </label>
-              )}
-              {(v?.assetId || detail.source.assetId) && (
-                <button
-                  className="button quiet"
-                  onClick={() =>
-                    api()
-                      .openAsset(v?.assetId || detail.source.assetId!)
-                      .catch(onError)
-                  }
-                >
-                  Open original
-                </button>
-              )}
-              {!readOnly && (
-                <button
-                  className="button quiet"
-                  onClick={() =>
-                    api().reprocessSource(sourceId, true).catch(onError)
-                  }
-                >
-                  Run English OCR
-                </button>
-              )}
-              {!readOnly &&
-                onBoard &&
-                !project.cards.some(
-                  (c) =>
-                    c.sourceId === sourceId || c.id === detail.source.cardId,
-                ) && (
-                  <button
-                    className="button quiet"
-                    onClick={() =>
-                      onBoard({
-                        title: detail.source.title,
-                        kind:
-                          detail.source.kind === "web" ? "link" : "document",
-                        sourceId,
-                        assetId: detail.source.assetId,
-                        url: detail.source.url,
-                        content: "",
-                      })
-                    }
-                  >
-                    Add to board
-                  </button>
-                )}
-            </div>
-            <div
-              className={`coverage ${v?.status === "ready" ? "" : "warning"}`}
-            >
-              <strong>
-                {v?.status.toUpperCase()} · {v?.processedUnits}/{v?.totalUnits}{" "}
-                units processed · {v?.method} text
-              </strong>
-              <span>
-                {v?.error ||
-                  "Passages retain their source version and location."}
-              </span>
-              {detail.source.duplicateOf && (
-                <span>
-                  Duplicate content: this source is not independent
-                  corroboration.
-                </span>
-              )}
-              <small>
-                {[v?.author, v?.publisher, v?.publishedAt]
-                  .filter(Boolean)
-                  .join(" · ")}{" "}
-                · acquired{" "}
-                {v?.acquiredAt && new Date(v.acquiredAt).toLocaleString()}
-                <br />
-                SHA-256: {v?.hash}
-              </small>
-            </div>
-            {notice && <p role="status">{notice}</p>}
-            {!readOnly && (
-              <p className="muted">
-                Select text within a passage, then choose “Use selection as
-                evidence”. You can also cite the whole passage.
-              </p>
-            )}
-            <div className="passage-list">
-              {detail.passages.map((p) => (
-                <article
-                  id={`passage-${p.id}`}
-                  className={`source-passage ${passageId === p.id ? "citation-target" : ""} ${p.inclusion === "exclude" ? "excluded" : ""}`}
-                  key={p.id}
-                >
-                  <div className="passage-heading">
-                    <strong>{p.locator}</strong>
-                    <span>
-                      {p.method === "ocr"
-                        ? "OCR — verify against original"
-                        : p.method}
-                    </span>
-                    {!readOnly && (
-                      <Policy
-                        label={`Inclusion ${p.locator}`}
-                        value={p.inclusion}
-                        onChange={(v) =>
-                          api().setPassagePolicy(p.id, v).catch(onError)
-                        }
-                      />
-                    )}
-                  </div>
-                  <p className="passage-text">{p.text}</p>
-                  {!readOnly && (
-                    <button
-                      className="text-button"
-                      onClick={() => {
-                        const selected = window
-                          .getSelection()
-                          ?.toString()
-                          .trim();
-                        setSelection({
-                          passage: p,
-                          quote:
-                            selected && p.text.includes(selected)
-                              ? selected
-                              : p.text,
-                        });
-                        setNotice("");
-                      }}
-                    >
-                      Use selection as evidence
-                    </button>
-                  )}
-                </article>
-              ))}
-            </div>
-            {!detail.passages.length && (
-              <p className="research-empty">
-                No extracted passages are available.{" "}
-                {v?.status === "processing" || v?.status === "queued"
-                  ? "Extraction is in progress."
-                  : "Retry extraction, run OCR, or add a manual excerpt as a note."}
-              </p>
-            )}
-            {!readOnly && (
-              <div className="reader-controls">
-                <button
-                  className="button quiet"
-                  onClick={() =>
-                    api().reprocessSource(sourceId, false).catch(onError)
-                  }
-                >
-                  Retry native extraction / recapture
-                </button>
-              </div>
-            )}
-          </>
-        )}
-        {selection && (
-          <div className="evidence-capture">
-            <h3>Link evidence</h3>
-            <blockquote>{selection.quote}</blockquote>
-            <label className="field">
-              Claim
-              <select
-                value={claimId}
-                onChange={(e) => setClaimId(e.target.value)}
-              >
-                <option value="">Create a new claim</option>
-                {research.claims.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {!claimId && (
-              <label className="field">
-                Claim to examine
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
-              </label>
-            )}
-            <label className="field">
-              Relationship
-              <select
-                value={relation}
-                onChange={(e) => setRelation(e.target.value as typeof relation)}
-              >
-                <option value="supports">Supports</option>
-                <option value="contradicts">Contradicts</option>
-                <option value="context">Context only</option>
-              </select>
-            </label>
-            <label className="field">
-              Researcher assessment
-              <textarea
-                value={rationale}
-                onChange={(e) => setRationale(e.target.value)}
-                placeholder="Why does this passage support or challenge the claim?"
-              />
-            </label>
-            <div className="modal-actions">
-              <button
-                className="button quiet"
-                onClick={() => setSelection(undefined)}
-              >
-                Cancel
-              </button>
-              <button
-                className="button primary"
-                disabled={!claimId && !title.trim()}
-                onClick={saveEvidence}
-              >
-                Save evidence link
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
-}
-function Policy({
-  value,
-  onChange,
-  label,
-}: {
-  value: Inclusion;
-  onChange: (p: Inclusion) => void;
-  label: string;
-}) {
-  return (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(e) => onChange(e.target.value as Inclusion)}
-    >
-      <option value="include">Include</option>
-      <option value="pin">Pin in analysis</option>
-      <option value="exclude">Exclude</option>
-    </select>
-  );
-}
 interface Props {
   project: Project;
   research: ResearchState;
@@ -540,25 +175,57 @@ interface Props {
   onSource: (source: string, version?: string, passage?: string) => void;
   onCard: (id: string) => void;
   onConnection: (connection: Connection) => void;
+  requestedClaim?: { id: string; key: number };
+  onClaimRequestHandled?: () => void;
 }
 export default function ResearchWorkspace(props: Props) {
   const { project, research, view, onError, onSource, onCard, onConnection } =
     props;
-  const [query, setQuery] = useState("");
+  const [textDraft] = useState(() => readResearchTextDraft(project.id));
+  const [query, setQuery] = useState(textDraft?.query || "");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searched, setSearched] = useState(false);
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(textDraft?.url || "");
   const [claim, setClaim] = useState<ResearchClaim>();
   const [task, setTask] = useState<ResearchTask>();
-  const [question, setQuestion] = useState(project.question);
+  const [question, setQuestion] = useState(
+    textDraft?.question ?? project.question,
+  );
   const [answerId, setAnswerId] = useState("");
   const [plan, setPlan] = useState<DiscoveryPlan>();
-  const [queries, setQueries] = useState("");
+  const [queries, setQueries] = useState(textDraft?.queries || "");
   const [key, setKey] = useState("");
   const [hasKey, setHasKey] = useState(false);
   const [suggestId, setSuggestId] = useState("");
   const [decided, setDecided] = useState<string[]>([]);
   const [working, setWorking] = useState(false);
+  const [highlightedClaim, setHighlightedClaim] = useState<string>();
+  const [assessmentClaim, setAssessmentClaim] = useState<string>();
+  useEffect(() => {
+    saveResearchTextDraft(project.id, { query, url, question, queries });
+  }, [project.id, query, url, question, queries]);
+  useEffect(() => {
+    const request = props.requestedClaim;
+    if (
+      view !== "evidence" ||
+      !request ||
+      !research.claims.some((c) => c.id === request.id)
+    )
+      return;
+    setHighlightedClaim(request.id);
+    const frame = requestAnimationFrame(() => {
+      const row = document.getElementById(`claim-${request.id}`);
+      row?.scrollIntoView({ block: "center" });
+      row?.focus({ preventScroll: true });
+      props.onClaimRequestHandled?.();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    view,
+    props.requestedClaim?.id,
+    props.requestedClaim?.key,
+    research.claims,
+  ]);
   useEffect(() => {
     api().hasSearchKey().then(setHasKey).catch(onError);
   }, []);
@@ -618,6 +285,7 @@ export default function ResearchWorkspace(props: Props) {
             </div>
             <span>{research.sources.length} sources</span>
           </div>
+          <OriginSummary project={project} research={research} />
           <form
             className="research-inline"
             onSubmit={(e) => {
@@ -763,7 +431,22 @@ export default function ResearchWorkspace(props: Props) {
               </thead>
               <tbody>
                 {research.claims.map((c) => (
-                  <tr key={c.id}>
+                  <tr
+                    key={c.id}
+                    id={`claim-${c.id}`}
+                    tabIndex={-1}
+                    data-search-target={highlightedClaim === c.id || undefined}
+                    style={
+                      highlightedClaim === c.id
+                        ? {
+                            outline: "2px solid var(--phosphor)",
+                            outlineOffset: "-2px",
+                            background:
+                              "var(--accent-surface, var(--panel-lift))",
+                          }
+                        : undefined
+                    }
+                  >
                     <td>
                       <button
                         className="claim-title"
@@ -774,6 +457,9 @@ export default function ResearchWorkspace(props: Props) {
                       <p>{c.question}</p>
                       <span className="eyebrow">{c.status}</span>
                       <div className="small-actions">
+                        <button onClick={() => setAssessmentClaim(c.id)}>
+                          Assess finding
+                        </button>
                         {c.cardId && (
                           <button onClick={() => onCard(c.cardId!)}>
                             Reveal on board
@@ -836,6 +522,12 @@ export default function ResearchWorkspace(props: Props) {
               into evidence.
             </p>
           )}
+          <AssumptionRegister
+            project={project}
+            research={research}
+            onError={onError}
+            onSource={onSource}
+          />
         </>
       )}
       {view === "tasks" && (
@@ -901,6 +593,7 @@ export default function ResearchWorkspace(props: Props) {
             <label className="field">
               Research question
               <textarea
+                aria-label="Research question"
                 rows={3}
                 required
                 value={question}
@@ -1072,7 +765,15 @@ export default function ResearchWorkspace(props: Props) {
             onSubmit={(e) => {
               e.preventDefault();
               action(async () => {
-                const p = await api().planDiscovery(question);
+                const p = await api().planDiscovery(
+                  question,
+                  queries.trim()
+                    ? queries
+                        .split("\n")
+                        .map((q) => q.trim())
+                        .filter(Boolean)
+                    : undefined,
+                );
                 setPlan(p);
                 setQueries(p.queries.join("\n"));
               });
@@ -1086,6 +787,20 @@ export default function ResearchWorkspace(props: Props) {
                 onChange={(e) => setQuestion(e.target.value)}
               />
             </label>
+            {!plan && queries.trim() && (
+              <label className="field">
+                Saved query draft (one per line)
+                <textarea
+                  rows={5}
+                  value={queries}
+                  onChange={(e) => setQueries(e.target.value)}
+                />
+                <span className="muted">
+                  These queries have not been approved for a new search. Prepare
+                  a plan to review its destination and limits.
+                </span>
+              </label>
+            )}
             <button className="button primary" disabled={working}>
               Prepare search plan
             </button>
@@ -1146,6 +861,7 @@ export default function ResearchWorkspace(props: Props) {
                     }
                     await api().approveDiscovery(plan.id);
                     setPlan(undefined);
+                    setQueries("");
                   })
                 }
               >
@@ -1199,6 +915,25 @@ export default function ResearchWorkspace(props: Props) {
           </div>
         </>
       )}
+      {assessmentClaim &&
+        research.claims.some((c) => c.id === assessmentClaim) && (
+          <Modal
+            title="Finding assessment"
+            onClose={() => setAssessmentClaim(undefined)}
+            wide
+          >
+            <FindingAssessmentPanel
+              project={project}
+              research={research}
+              claim={research.claims.find((c) => c.id === assessmentClaim)!}
+              onError={onError}
+              onSource={(sourceId, versionId, passageId) => {
+                setAssessmentClaim(undefined);
+                onSource(sourceId, versionId, passageId);
+              }}
+            />
+          </Modal>
+        )}
       {claim && (
         <Modal
           title={

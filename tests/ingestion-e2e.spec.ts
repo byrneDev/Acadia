@@ -222,7 +222,7 @@ test("Legacy migration backs up exact input and preserves positions and incomple
   const session = await launch(original);
   try {
     const loaded = await session.page.evaluate(() => window.acadia!.load());
-    expect(loaded.project.schemaVersion).toBe(2);
+    expect(loaded.project.schemaVersion).toBe(3);
     expect(loaded.project.cards[0].x).toBe(731);
     expect(loaded.project.connections).toEqual(legacy.connections);
     const source = await session.page.evaluate(async () => {
@@ -277,7 +277,7 @@ test("An unreadable legacy workspace is preserved byte-for-byte before a replace
     expect(recovery).toBeTruthy();
     expect(await readFile(join(workspace, recovery!), "utf8")).toBe(corrupt);
     const loaded = await session.page.evaluate(() => window.acadia!.load());
-    expect(loaded.project.schemaVersion).toBe(2);
+    expect(loaded.project.schemaVersion).toBe(3);
     expect(loaded.project.cards.length).toBeGreaterThan(0);
   } finally {
     await session.app.evaluate(({ app }) => app.exit(0)).catch(() => undefined);

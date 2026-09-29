@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "../shared/types";
 import { validateProject, validateCitation } from "../shared/project";
@@ -20,6 +20,25 @@ import type {
   SourceRecord,
   SourceVersion,
 } from "../shared/research";
+import {
+  createBrief,
+  emptyPedigreeState,
+  PEDIGREE_COLLECTIONS,
+  validatePedigreeEntity,
+  validatePedigreeState,
+  type ResearchBrief,
+  type SourceAppraisal,
+  type SourceOrigin,
+  type FindingAssessment,
+  type ResearchAssumption,
+  type MethodWorksheet,
+  type ReviewIssue,
+  type PedigreeEntity,
+  type PedigreeEntityKind,
+  type PedigreeRevision,
+  type PedigreeSnapshot,
+  type PedigreeState,
+} from "../shared/pedigree";
 
 const now = () => new Date().toISOString();
 export const contentHash = (value: string | Buffer) =>
@@ -34,8 +53,8 @@ function checkId(id: unknown): asserts id is string {
 function cleanData<T>(value: T): T {
   return JSON.parse(
     JSON.stringify(value, (key, val) =>
-      /^(?:apiKey|searchKey|token|password|authorization|credential|credentials|secret)$/i.test(
-        key,
+      /^(?:apikey|searchkey|token|accesstoken|refreshtoken|bearertoken|password|authorization|credential|credentials|secret|clientsecret|secretaccesskey)$/i.test(
+        key.replace(/[_-]/g, ""),
       )
         ? undefined
         : val,
@@ -47,19 +66,442 @@ function policy(value: unknown): asserts value is Inclusion {
     throw new Error("Invalid inclusion policy.");
 }
 export interface ResearchArchive extends ResearchState {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   passages: Passage[];
+  pedigree?: PedigreeState;
+  pedigreeRevisions?: PedigreeRevision[];
+  pedigreeSnapshots?: PedigreeSnapshot[];
+}
+
+type PedigreeEvidence = Pick<
+  ResearchArchive,
+  "sources" | "versions" | "passages" | "claims" | "tasks"
+> & { reportIds?: string[] };
+export function validatePedigreeReferences(
+  state: PedigreeState,
+  evidence: PedigreeEvidence,
+): void {
+  const sources = new Map(
+    evidence.sources.map((source) => [source.id, source]),
+  );
+  const versions = new Map(
+    evidence.versions.map((version) => [version.id, version]),
+  );
+  const passages = new Map(
+    evidence.passages.map((passage) => [passage.id, passage]),
+  );
+  const claims = new Set(evidence.claims.map((claim) => claim.id));
+  const assumptions = new Set(state.assumptions.map((item) => item.id));
+  const tasks = new Set(evidence.tasks.map((task) => task.id));
+  const methods = new Set(state.methods.map((method) => method.id));
+  const references = (
+    ids: string[],
+    has: (id: string) => boolean,
+    label: string,
+  ) => {
+    if (ids.some((id) => !has(id)))
+      throw new Error(
+        `Pedigree ${label} reference is missing or belongs to another investigation.`,
+      );
+  };
+  const rowReferences = (row: {
+    passageIds?: string[];
+    claimIds?: string[];
+    assumptionIds?: string[];
+    taskIds?: string[];
+  }) => {
+    references(row.passageIds || [], (id) => passages.has(id), "passage");
+    references(row.claimIds || [], (id) => claims.has(id), "claim");
+    references(
+      row.assumptionIds || [],
+      (id) => assumptions.has(id),
+      "assumption",
+    );
+    references(row.taskIds || [], (id) => tasks.has(id), "task");
+  };
+  for (const task of evidence.tasks) {
+    if (task.assumptionId)
+      references(
+        [task.assumptionId],
+        (id) => assumptions.has(id),
+        "task assumption",
+      );
+    if (task.methodId)
+      references([task.methodId], (id) => methods.has(id), "task method");
+  }
+  for (const appraisal of state.appraisals) {
+    if (
+      !sources.has(appraisal.sourceId) ||
+      versions.get(appraisal.versionId)?.sourceId !== appraisal.sourceId
+    )
+      throw new Error(
+        "Appraisal source version is missing or belongs to another investigation.",
+      );
+    if (
+      appraisal.passageIds.some(
+        (id) => passages.get(id)?.versionId !== appraisal.versionId,
+      )
+    )
+      throw new Error(
+        "Appraisal passage must belong to the assessed source version.",
+      );
+  }
+  for (const origin of state.origins)
+    references(
+      [origin.sourceId, origin.relatedSourceId],
+      (id) => sources.has(id),
+      "origin source",
+    );
+  for (const finding of state.findings) {
+    references([finding.claimId], (id) => claims.has(id), "finding claim");
+    rowReferences(finding);
+  }
+  for (const assumption of state.assumptions) rowReferences(assumption);
+  for (const method of state.methods)
+    for (const row of method.rows) {
+      rowReferences(row);
+      if ("evaluations" in row)
+        references(
+          row.evaluations.map((evaluation) => evaluation.passageId),
+          (id) => passages.has(id),
+          "hypothesis evidence",
+        );
+    }
+  for (const issue of state.issues) {
+    rowReferences(issue);
+    if (issue.claimId)
+      references([issue.claimId], (id) => claims.has(id), "review claim");
+    if (issue.methodId)
+      references(
+        [issue.methodId],
+        (id) => state.methods.some((method) => method.id === id),
+        "review method",
+      );
+    if (issue.reportId && evidence.reportIds)
+      references(
+        [issue.reportId],
+        (id) => evidence.reportIds!.includes(id),
+        "review report",
+      );
+    const target = issue.target;
+    const exists =
+      target.kind === "source"
+        ? sources.has(target.id)
+        : target.kind === "claim" || target.kind === "finding"
+          ? claims.has(target.id)
+          : target.kind === "report"
+            ? !evidence.reportIds || evidence.reportIds.includes(target.id)
+            : state[PEDIGREE_COLLECTIONS[target.kind]].some(
+                (item) => item.id === target.id,
+              );
+    if (!exists)
+      throw new Error(
+        "Review target is missing or belongs to another investigation.",
+      );
+  }
+}
+
+function stableJSON(value: unknown): string {
+  const sort = (item: unknown): unknown =>
+    Array.isArray(item)
+      ? item.map(sort)
+      : item && typeof item === "object"
+        ? Object.fromEntries(
+            Object.entries(item)
+              .filter(([, val]) => val !== undefined)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([key, val]) => [key, sort(val)]),
+          )
+        : item;
+  return JSON.stringify(sort(value));
+}
+export function snapshotHash(
+  value: Omit<PedigreeSnapshot, "hash"> | PedigreeSnapshot,
+): string {
+  const { hash: _hash, ...data } = value as PedigreeSnapshot;
+  return contentHash(stableJSON(data));
+}
+
+export function validatePedigreeSnapshot(
+  input: unknown,
+  projectId?: string,
+): PedigreeSnapshot {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error("Invalid pedigree snapshot.");
+  const value = input as PedigreeSnapshot;
+  checkId(value.id);
+  checkId(value.projectId);
+  if (
+    value.schemaVersion !== 1 ||
+    typeof value.createdAt !== "string" ||
+    !Number.isFinite(Date.parse(value.createdAt)) ||
+    value.hash !== snapshotHash(value)
+  )
+    throw new Error("Pedigree snapshot hash or version is invalid.");
+  const state = validatePedigreeState(value.state, value.projectId);
+  const evidence = validateResearchArchive(
+    {
+      schemaVersion: 2,
+      sources: value.sources,
+      versions: value.sourceVersions,
+      passages: value.passages,
+      claims: value.claims,
+      tasks: value.tasks,
+      jobs: [],
+      runs: [],
+      discoveries: [],
+    },
+    value.projectId,
+    state,
+  );
+  validatePedigreeReferences(state, evidence);
+  if (
+    !Array.isArray(value.sourceIds) ||
+    value.sourceIds.length !== evidence.sources.length ||
+    new Set(value.sourceIds).size !== value.sourceIds.length ||
+    value.sourceIds.some(
+      (id) => !evidence.sources.some((source) => source.id === id),
+    )
+  )
+    throw new Error("Snapshot source references are incomplete.");
+  const owner = projectId ?? value.projectId;
+  const mappedState = emptyPedigreeState();
+  for (const key of Object.values(PEDIGREE_COLLECTIONS))
+    (mappedState[key] as PedigreeEntity[]) = state[key].map((entity) => ({
+      ...entity,
+      projectId: owner,
+    }));
+  const normalized = {
+    schemaVersion: 1 as const,
+    id: value.id,
+    projectId: owner,
+    createdAt: value.createdAt,
+    state: mappedState,
+    claims: evidence.claims.map((claim) => ({ ...claim, projectId: owner })),
+    tasks: evidence.tasks.map((task) => ({ ...task, projectId: owner })),
+    passages: evidence.passages,
+    sources: evidence.sources.map(({ assetId: _asset, ...source }) => ({
+      ...source,
+      projectId: owner,
+    })),
+    sourceVersions: evidence.versions.map(
+      ({ assetId: _asset, snapshot: _snapshot, ...version }) => version,
+    ),
+    sourceIds: value.sourceIds,
+  };
+  // Ownership can be rebased for an explicit archive import; evidence and revision IDs remain exact.
+  return { ...normalized, hash: snapshotHash(normalized) };
+}
+
+function validatedRunAudit(
+  record: Record<string, unknown>,
+  passages: Map<string, Passage>,
+  sources: Map<string, SourceRecord>,
+): Pick<AnalysisRun, "requests" | "retrieval" | "quotationAssociations"> {
+  const obj = (value: unknown): Record<string, unknown> => {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Invalid analysis audit record.");
+    return value as Record<string, unknown>;
+  };
+  const list = (value: unknown, max = 100_000): unknown[] => {
+    if (!Array.isArray(value) || value.length > max)
+      throw new Error("Invalid analysis audit collection.");
+    return value;
+  };
+  const str = (value: unknown, max = 4_000_000): string => {
+    if (typeof value !== "string" || value.length > max)
+      throw new Error("Invalid analysis audit text.");
+    return value;
+  };
+  const number = (value: unknown): number => {
+    if (!Number.isSafeInteger(value) || (value as number) < 0)
+      throw new Error("Invalid analysis audit count.");
+    return value as number;
+  };
+  const ident = (value: unknown): string => {
+    checkId(value);
+    return value;
+  };
+  const choice = <T extends string>(
+    value: unknown,
+    choices: readonly T[],
+  ): T => {
+    if (!choices.includes(value as T))
+      throw new Error("Invalid analysis audit value.");
+    return value as T;
+  };
+  const result: Pick<
+    AnalysisRun,
+    "requests" | "retrieval" | "quotationAssociations"
+  > = {};
+  if (record.requests !== undefined)
+    result.requests = list(record.requests, 1000).map((entry) => {
+      const request = obj(entry),
+        endpoint = str(request.endpoint, 2048),
+        url = new URL(endpoint);
+      if (
+        !["https:", "http:"].includes(url.protocol) ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash
+      )
+        throw new Error("Audit endpoint must not contain credentials.");
+      const parameters = cleanData(obj(request.parameters));
+      if (JSON.stringify(parameters).length > 1_000_000)
+        throw new Error("Analysis request parameters are too large.");
+      return {
+        provider: str(request.provider, 200),
+        endpoint,
+        model: str(request.model, 1000),
+        parameters,
+        messages: list(request.messages, 1000).map((entry) => {
+          const message = obj(entry);
+          return {
+            role: str(message.role, 100),
+            content: str(message.content),
+          };
+        }),
+      };
+    });
+  if (record.retrieval !== undefined) {
+    const manifest = obj(record.retrieval),
+      limits = obj(manifest.limits),
+      perPool = obj(manifest.perPool);
+    const pools = ["pins", "support", "counter", "gaps"] as const;
+    result.retrieval = {
+      policy: choice(manifest.policy, ["balanced-four-pools-v1"]),
+      limits: {
+        characters: number(limits.characters),
+        passages: number(limits.passages),
+      },
+      perPool: {
+        characters: number(perPool.characters),
+        passages: number(perPool.passages),
+      },
+      usedCharacters: number(manifest.usedCharacters),
+      selections: list(manifest.selections).map((entry) => {
+        const row = obj(entry),
+          passageId = ident(row.passageId);
+        if (!passages.has(passageId) || typeof row.redistributed !== "boolean")
+          throw new Error("Invalid selected evidence reference.");
+        return {
+          passageId,
+          pool: choice(row.pool, pools),
+          matchedPools: list(row.matchedPools, 4).map((pool) =>
+            choice(pool, pools),
+          ),
+          reason: str(row.reason, 10000),
+          characters: number(row.characters),
+          redistributed: row.redistributed,
+        };
+      }),
+      omissions: list(manifest.omissions).map((entry) => {
+        const row = obj(entry),
+          passageId = ident(row.passageId);
+        if (!passages.has(passageId))
+          throw new Error("Invalid omitted evidence reference.");
+        return {
+          passageId,
+          reason: choice(row.reason, [
+            "duplicate-file",
+            "context-budget",
+            "not-retrieved",
+            "source-excluded",
+            "passage-excluded",
+            "incomplete-extraction",
+            "superseded-version",
+          ]),
+          detail: str(row.detail, 10000),
+        };
+      }),
+      ...(manifest.independentSourceGroups !== undefined
+        ? {
+            independentSourceGroups: list(manifest.independentSourceGroups).map(
+              (group) =>
+                list(group).map((value) => {
+                  const id = ident(value);
+                  if (!sources.has(id))
+                    throw new Error("Invalid source independence group.");
+                  return id;
+                }),
+            ),
+          }
+        : {}),
+    };
+  }
+  if (record.quotationAssociations !== undefined)
+    result.quotationAssociations = list(record.quotationAssociations).map(
+      (entry) => {
+        const row = obj(entry),
+          start = number(row.start),
+          end = number(row.end);
+        if (end < start) throw new Error("Invalid quotation location.");
+        return {
+          quote: str(row.quote),
+          start,
+          end,
+          labels: list(row.labels, 10000).map((label) => str(label, 100)),
+          matchingLabels: list(row.matchingLabels, 10000).map((label) =>
+            str(label, 100),
+          ),
+          status: choice(row.status, ["verified", "ambiguous"]),
+        };
+      },
+    );
+  return result;
 }
 
 /** Entity rows and FTS are separate from the lightweight board project. Original assets live on disk. */
 export class ResearchStore {
   private db: DatabaseSync;
   private depth = 0;
+  readonly migrationBackupPath?: string;
   constructor(storageRoot: string) {
     mkdirSync(storageRoot, { recursive: true });
-    this.db = new DatabaseSync(join(storageRoot, "research.sqlite"));
-    this.db
-      .exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
+    const databasePath = join(storageRoot, "research.sqlite");
+    const existed = existsSync(databasePath);
+    this.db = new DatabaseSync(databasePath);
+    const version = Number(
+      (this.db.prepare("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    );
+    if (version > 3) {
+      this.db.close();
+      throw new Error(
+        "This research database was created by a newer Acadia version. Open it with that version; no data was changed.",
+      );
+    }
+    try {
+      if (existed && version < 3) {
+        const recovery = join(storageRoot, "recovery");
+        mkdirSync(recovery, { recursive: true });
+        this.migrationBackupPath = join(
+          recovery,
+          `schema-v${version || 2}-to-v3-${Date.now()}-${randomUUID()}.sqlite`,
+        );
+        // VACUUM INTO takes a consistent SQLite snapshot, including committed WAL content.
+        this.db.prepare("VACUUM INTO ?").run(this.migrationBackupPath);
+        const backup = new DatabaseSync(this.migrationBackupPath, {
+          readOnly: true,
+        });
+        try {
+          const check = backup.prepare("PRAGMA integrity_check").get() as {
+            integrity_check: string;
+          };
+          if (check.integrity_check !== "ok")
+            throw new Error(
+              "SQLite migration backup did not pass its integrity check.",
+            );
+        } finally {
+          backup.close();
+        }
+      }
+      this.db.exec(
+        "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+      );
+      this.transaction(() => {
+        this.db.exec(`
       CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sources(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,card_id TEXT, data TEXT NOT NULL);
@@ -74,7 +516,26 @@ export class ResearchStore {
       CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS discoveries(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS discovery_plans(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data TEXT NOT NULL,claimed INTEGER NOT NULL DEFAULT 0);`);
+      CREATE TABLE IF NOT EXISTS discovery_plans(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data TEXT NOT NULL,claimed INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS pedigree_entities(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS pedigree_project ON pedigree_entities(project_id,kind);
+      CREATE TABLE IF NOT EXISTS pedigree_revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,entity_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,UNIQUE(entity_id,revision));
+      CREATE INDEX IF NOT EXISTS pedigree_revision_project ON pedigree_revisions(project_id);
+      CREATE TABLE IF NOT EXISTS pedigree_snapshots(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data TEXT NOT NULL);
+      PRAGMA user_version=3;`);
+        // Seed scope only from the recorded question; never infer that the researcher reviewed it.
+        for (const row of this.db.prepare("SELECT data FROM projects").all()) {
+          const project = parse<Project>(row)!;
+          if (!this.listPedigree<ResearchBrief>(project.id, "brief").length)
+            this.saveBrief(createBrief(project.id, project.question));
+        }
+      });
+    } catch (error) {
+      this.db.close();
+      throw new Error(
+        `Acadia could not migrate the research database. The previous database was preserved.${this.migrationBackupPath ? ` Recovery backup: ${this.migrationBackupPath}.` : ""} ${error instanceof Error ? error.message : "Migration failed."}`,
+      );
+    }
     // Jobs cannot silently resume network or model work after a crash.
     for (const row of this.db.prepare("SELECT data FROM jobs").all()) {
       const job = parse<ResearchJob>(row)!;
@@ -105,13 +566,19 @@ export class ResearchStore {
     this.depth++;
     try {
       const result = action();
-      this.depth--;
       if (outer) this.db.exec("COMMIT");
       return result;
     } catch (error) {
-      this.depth--;
-      if (outer) this.db.exec("ROLLBACK");
+      if (outer) {
+        // A failed COMMIT may leave the transaction active. Preserve the
+        // original error even if SQLite has already rolled it back itself.
+        try {
+          this.db.exec("ROLLBACK");
+        } catch {}
+      }
       throw error;
+    } finally {
+      this.depth--;
     }
   }
   get activeProjectId(): string | undefined {
@@ -132,9 +599,38 @@ export class ResearchStore {
   }
   saveProject(project: Project): void {
     const clean = validateProject(project);
-    clean.schemaVersion = 2;
+    clean.schemaVersion = 3;
     this.transaction(() => {
       this.syncCards(clean);
+      for (const card of clean.cards)
+        if (card.methodId) {
+          const method = this.db
+            .prepare("SELECT project_id,kind FROM pedigree_entities WHERE id=?")
+            .get(card.methodId) as
+            { project_id: string; kind: string } | undefined;
+          if (
+            !method ||
+            method.project_id !== clean.id ||
+            method.kind !== "method"
+          )
+            throw new Error(
+              "Board method reference is outside this investigation.",
+            );
+        }
+      for (const output of clean.outputs)
+        for (const snapshotId of [
+          output.pedigreeSnapshotId,
+          ...(output.revisions || []).map(
+            (revision) => revision.pedigreeSnapshotId,
+          ),
+        ])
+          if (
+            snapshotId &&
+            this.getPedigreeSnapshot(snapshotId).projectId !== clean.id
+          )
+            throw new Error(
+              "Report pedigree snapshot is outside this investigation.",
+            );
       for (const output of clean.outputs)
         for (const citation of [
           ...(output.citations ?? []),
@@ -156,9 +652,11 @@ export class ResearchStore {
       this.db
         .prepare("INSERT OR REPLACE INTO projects VALUES(?,?)")
         .run(clean.id, JSON.stringify(cleanData(clean)));
+      if (!this.listPedigree<ResearchBrief>(clean.id, "brief").length)
+        this.saveBrief(createBrief(clean.id, clean.question));
     });
     // Assign generated references back to the caller, without changing annotations.
-    project.schemaVersion = 2;
+    project.schemaVersion = 3;
     project.cards = clean.cards;
   }
   getProject(id: string): Project | undefined {
@@ -208,6 +706,193 @@ export class ResearchStore {
         `INSERT OR REPLACE INTO ${table}(id,project_id,data) VALUES(?,?,?)`,
       )
       .run(value.id, value.projectId, JSON.stringify(cleanData(value)));
+  }
+  private listPedigree<T extends PedigreeEntity>(
+    projectId: string,
+    kind: PedigreeEntityKind,
+  ): T[] {
+    checkId(projectId);
+    return this.db
+      .prepare(
+        "SELECT data FROM pedigree_entities WHERE project_id=? AND kind=? ORDER BY rowid",
+      )
+      .all(projectId, kind)
+      .map((row) => parse<T>(row)!);
+  }
+  pedigreeState(projectId: string): PedigreeState {
+    return {
+      briefs: this.listPedigree(projectId, "brief"),
+      appraisals: this.listPedigree(projectId, "appraisal"),
+      origins: this.listPedigree(projectId, "origin"),
+      findings: this.listPedigree(projectId, "finding"),
+      assumptions: this.listPedigree(projectId, "assumption"),
+      methods: this.listPedigree(projectId, "method"),
+      issues: this.listPedigree(projectId, "issue"),
+    };
+  }
+  private allPassages(projectId: string): Passage[] {
+    return this.db
+      .prepare(
+        "SELECT p.data FROM passages p JOIN sources s ON s.id=p.source_id WHERE s.project_id=? ORDER BY p.rowid",
+      )
+      .all(projectId)
+      .map((row) => parse<Passage>(row)!);
+  }
+  private savePedigree<T extends PedigreeEntity>(
+    kind: PedigreeEntityKind,
+    input: T,
+  ): T {
+    const value = validatePedigreeEntity(kind, input, input.projectId) as T;
+    return this.transaction(() => {
+      const project = this.getProject(value.projectId);
+      if (!project) throw new Error("Investigation not found.");
+      const old = this.db
+        .prepare(
+          "SELECT project_id,kind,data FROM pedigree_entities WHERE id=?",
+        )
+        .get(value.id) as
+        { project_id: string; kind: string; data: string } | undefined;
+      if (old && (old.project_id !== value.projectId || old.kind !== kind))
+        throw new Error(
+          "Pedigree identifier belongs to another record or investigation.",
+        );
+      const previous = old
+        ? (JSON.parse(old.data) as PedigreeEntity)
+        : undefined;
+      if ((previous?.revision ?? 0) !== value.revision)
+        throw new Error(
+          "This assessment changed since it was opened. Reload the latest revision before saving.",
+        );
+      const timestamp = now();
+      const saved = {
+        ...value,
+        revision: (previous?.revision ?? 0) + 1,
+        createdAt: previous?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+      } as T;
+      const state = this.pedigreeState(value.projectId),
+        key = PEDIGREE_COLLECTIONS[kind];
+      (state[key] as PedigreeEntity[]) = [
+        ...state[key].filter((entry) => entry.id !== saved.id),
+        saved,
+      ];
+      validatePedigreeState(state, value.projectId);
+      const research = this.state(value.projectId);
+      validatePedigreeReferences(state, {
+        ...research,
+        passages: this.allPassages(value.projectId),
+        reportIds: project.outputs.map((output) => output.id),
+      });
+      this.db
+        .prepare(
+          "INSERT INTO pedigree_entities(id,project_id,kind,data) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+        )
+        .run(saved.id, saved.projectId, kind, JSON.stringify(cleanData(saved)));
+      const revision: PedigreeRevision = {
+        id: randomUUID(),
+        projectId: saved.projectId,
+        entityId: saved.id,
+        kind,
+        revision: saved.revision,
+        createdAt: timestamp,
+        data: saved,
+      };
+      this.db
+        .prepare("INSERT INTO pedigree_revisions VALUES(?,?,?,?,?,?)")
+        .run(
+          revision.id,
+          revision.projectId,
+          saved.id,
+          kind,
+          saved.revision,
+          JSON.stringify(cleanData(revision)),
+        );
+      return saved;
+    });
+  }
+  saveBrief(value: ResearchBrief) {
+    return this.savePedigree("brief", value);
+  }
+  saveAppraisal(value: SourceAppraisal) {
+    return this.savePedigree("appraisal", value);
+  }
+  saveOrigin(value: SourceOrigin) {
+    return this.savePedigree("origin", value);
+  }
+  saveFinding(value: FindingAssessment) {
+    return this.savePedigree("finding", value);
+  }
+  saveAssumption(value: ResearchAssumption) {
+    return this.savePedigree("assumption", value);
+  }
+  saveMethod(value: MethodWorksheet) {
+    return this.savePedigree("method", value);
+  }
+  saveReviewIssue(value: ReviewIssue) {
+    return this.savePedigree("issue", value);
+  }
+  getPedigreeRevisions(
+    kind: PedigreeEntityKind,
+    entityId: string,
+  ): PedigreeRevision[] {
+    checkId(entityId);
+    if (!(kind in PEDIGREE_COLLECTIONS))
+      throw new Error("Unknown pedigree record kind.");
+    return this.db
+      .prepare(
+        "SELECT data FROM pedigree_revisions WHERE entity_id=? AND kind=? ORDER BY revision",
+      )
+      .all(entityId, kind)
+      .map((row) => parse<PedigreeRevision>(row)!);
+  }
+  createPedigreeSnapshot(
+    projectId: string,
+    options: { claimIds?: string[]; passageIds?: string[] } = {},
+  ): PedigreeSnapshot {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error("Investigation not found.");
+    const research = this.state(projectId),
+      state = this.pedigreeState(projectId),
+      allPassages = this.allPassages(projectId);
+    for (const id of options.claimIds || [])
+      if (!research.claims.some((claim) => claim.id === id))
+        throw new Error("Snapshot claim is outside this investigation.");
+    for (const id of options.passageIds || [])
+      if (!allPassages.some((passage) => passage.id === id))
+        throw new Error("Snapshot passage is outside this investigation.");
+    // Keep the full saved evidentiary context; optional IDs validate the analysis's selection.
+    // This local snapshot is never implicitly sent to a provider.
+    const data: Omit<PedigreeSnapshot, "hash"> = {
+      schemaVersion: 1,
+      id: randomUUID(),
+      projectId,
+      createdAt: now(),
+      state,
+      claims: research.claims,
+      tasks: research.tasks,
+      passages: allPassages,
+      sources: research.sources.map(({ assetId: _asset, ...source }) => source),
+      sourceVersions: research.versions.map(
+        ({ assetId: _asset, snapshot: _snapshot, ...version }) => version,
+      ),
+      sourceIds: research.sources.map((source) => source.id),
+    };
+    // Hash the persisted representation after credential scrubbing, so a
+    // sanitized snapshot cannot have a hash for a different unsanitized value.
+    const persisted = cleanData(data);
+    const snapshot = { ...persisted, hash: snapshotHash(persisted) };
+    this.db
+      .prepare("INSERT INTO pedigree_snapshots VALUES(?,?,?)")
+      .run(snapshot.id, projectId, JSON.stringify(snapshot));
+    return snapshot;
+  }
+  getPedigreeSnapshot(id: string): PedigreeSnapshot {
+    checkId(id);
+    const snapshot = parse<PedigreeSnapshot>(
+      this.db.prepare("SELECT data FROM pedigree_snapshots WHERE id=?").get(id),
+    );
+    if (!snapshot) throw new Error("Pedigree snapshot not found.");
+    return snapshot;
   }
   state(projectId: string): ResearchState {
     const sources = this.list<SourceRecord>("sources", projectId);
@@ -393,9 +1078,16 @@ export class ResearchStore {
   setPassagePolicy(id: string, inclusion: Inclusion) {
     policy(inclusion);
     const passage = this.getPassage(id);
-    this.db
-      .prepare("UPDATE passages SET data=? WHERE id=?")
-      .run(JSON.stringify({ ...passage, inclusion }), id);
+    this.transaction(() => {
+      this.db
+        .prepare("UPDATE passages SET data=? WHERE id=?")
+        .run(JSON.stringify({ ...passage, inclusion }), id);
+      const source = this.getSource(passage.sourceId).source;
+      // A policy change changes the usable evidence base even when document bytes
+      // stay unchanged. Keep the report's frozen source timestamp for comparison.
+      const updatedAt = new Date(Math.max(Date.now(), Date.parse(source.updatedAt) + 1)).toISOString();
+      this.saveSource({ ...source, updatedAt });
+    });
   }
   listPassages(
     projectId: string,
@@ -626,14 +1318,81 @@ export class ResearchStore {
     this.write("claims", value);
   }
   deleteClaim(id: string) {
+    checkId(id);
+    const claim = parse<ResearchClaim>(
+      this.db.prepare("SELECT data FROM claims WHERE id=?").get(id),
+    );
+    if (!claim) return;
+    const state = this.pedigreeState(claim.projectId);
+    if (
+      state.findings.some((finding) => finding.claimId === id) ||
+      state.assumptions.some((assumption) =>
+        assumption.claimIds.includes(id),
+      ) ||
+      state.methods.some((method) =>
+        method.rows.some((row) => row.claimIds.includes(id)),
+      ) ||
+      state.issues.some(
+        (issue) =>
+          issue.claimId === id ||
+          issue.claimIds.includes(id) ||
+          (["claim", "finding"].includes(issue.target.kind) &&
+            issue.target.id === id),
+      )
+    )
+      throw new Error(
+        "This finding is referenced by an assessment or method. Keep its research history and revise the assessment instead of deleting it.",
+      );
+    if (
+      this.list<ResearchTask>("tasks", claim.projectId).some(
+        (task) => task.claimId === id,
+      )
+    )
+      throw new Error(
+        "This finding is linked to a research task. Reassign or remove that task's finding link before deleting the finding.",
+      );
     this.db.prepare("DELETE FROM claims WHERE id=?").run(id);
   }
   saveTask(value: ResearchTask) {
     if (!["planned", "doing", "blocked", "complete"].includes(value.status))
       throw new Error("Invalid task status.");
+    if (value.assumptionId !== undefined) checkId(value.assumptionId);
+    if (value.methodId !== undefined) checkId(value.methodId);
+    if (value.assumptionId || value.methodId) {
+      const state = this.pedigreeState(value.projectId);
+      if (
+        value.assumptionId &&
+        !state.assumptions.some((item) => item.id === value.assumptionId)
+      )
+        throw new Error(
+          "Task assumption is missing or belongs to another investigation.",
+        );
+      if (
+        value.methodId &&
+        !state.methods.some((item) => item.id === value.methodId)
+      )
+        throw new Error(
+          "Task method is missing or belongs to another investigation.",
+        );
+    }
     this.write("tasks", value);
   }
   deleteTask(id: string) {
+    checkId(id);
+    const task = parse<ResearchTask>(
+      this.db.prepare("SELECT data FROM tasks WHERE id=?").get(id),
+    );
+    if (!task) return;
+    const state = this.pedigreeState(task.projectId);
+    if (
+      state.methods.some((method) =>
+        method.rows.some((row) => row.taskIds.includes(id)),
+      ) ||
+      state.issues.some((issue) => issue.taskIds.includes(id))
+    )
+      throw new Error(
+        "This research task is referenced by a method or review issue. Keep its history and update its status instead of deleting it, or unlink it from the worksheet first.",
+      );
     this.db.prepare("DELETE FROM tasks WHERE id=?").run(id);
   }
   saveJob(value: ResearchJob) {
@@ -688,7 +1447,20 @@ export class ResearchStore {
       .map((row) => parse<Passage>(row)!);
     return cleanData({
       ...state,
-      schemaVersion: 2,
+      schemaVersion: 3,
+      pedigree: this.pedigreeState(projectId),
+      pedigreeRevisions: this.db
+        .prepare(
+          "SELECT data FROM pedigree_revisions WHERE project_id=? ORDER BY rowid",
+        )
+        .all(projectId)
+        .map((row) => parse<PedigreeRevision>(row)!),
+      pedigreeSnapshots: this.db
+        .prepare(
+          "SELECT data FROM pedigree_snapshots WHERE project_id=? ORDER BY rowid",
+        )
+        .all(projectId)
+        .map((row) => parse<PedigreeSnapshot>(row)!),
       passages,
       jobs: [],
       // Portable snapshots cannot carry a live worker. Preserve completed text
@@ -741,6 +1513,9 @@ export class ResearchStore {
           "runs",
           "discoveries",
           "discovery_plans",
+          "pedigree_entities",
+          "pedigree_revisions",
+          "pedigree_snapshots",
         ])
           this.db
             .prepare(`DELETE FROM ${table} WHERE project_id=?`)
@@ -764,9 +1539,81 @@ export class ResearchStore {
       // Restore exported current pointers (historical versions are not necessarily ordered).
       for (const source of data.sources) this.saveSource(source);
       for (const claim of data.claims) this.saveClaim(claim);
-      for (const task of data.tasks) this.saveTask(task);
       for (const run of data.runs) this.saveRun(run);
       for (const item of data.discoveries) this.saveDiscovery(item);
+      if (data.pedigree) {
+        for (const [kind, key] of Object.entries(PEDIGREE_COLLECTIONS) as [
+          PedigreeEntityKind,
+          keyof PedigreeState,
+        ][]) {
+          for (const entity of data.pedigree[key]) {
+            const existing = this.db
+              .prepare(
+                "SELECT project_id,kind FROM pedigree_entities WHERE id=?",
+              )
+              .get(entity.id) as
+              { project_id: string; kind: string } | undefined;
+            if (
+              existing &&
+              (existing.project_id !== projectId || existing.kind !== kind)
+            )
+              throw new Error(
+                "Imported pedigree identifier collides with another investigation.",
+              );
+            // A newly created destination's unassessed seed brief is superseded by the imported brief.
+            if (kind === "brief")
+              this.db
+                .prepare(
+                  "DELETE FROM pedigree_entities WHERE project_id=? AND kind='brief'",
+                )
+                .run(projectId);
+            this.db
+              .prepare(
+                "INSERT OR REPLACE INTO pedigree_entities VALUES(?,?,?,?)",
+              )
+              .run(entity.id, projectId, kind, JSON.stringify(entity));
+          }
+        }
+      }
+      for (const revision of data.pedigreeRevisions || []) {
+        const existing = parse<PedigreeRevision>(
+          this.db
+            .prepare(
+              "SELECT data FROM pedigree_revisions WHERE id=? OR (entity_id=? AND revision=?)",
+            )
+            .get(revision.id, revision.entityId, revision.revision),
+        );
+        if (existing && stableJSON(existing) !== stableJSON(revision))
+          throw new Error("Conflicting immutable pedigree revision.");
+        if (!existing)
+          this.db
+            .prepare("INSERT INTO pedigree_revisions VALUES(?,?,?,?,?,?)")
+            .run(
+              revision.id,
+              projectId,
+              revision.entityId,
+              revision.kind,
+              revision.revision,
+              JSON.stringify(revision),
+            );
+      }
+      for (const snapshot of data.pedigreeSnapshots || []) {
+        const existing = parse<PedigreeSnapshot>(
+          this.db
+            .prepare("SELECT data FROM pedigree_snapshots WHERE id=?")
+            .get(snapshot.id),
+        );
+        if (existing && stableJSON(existing) !== stableJSON(snapshot))
+          throw new Error("Conflicting immutable pedigree snapshot.");
+        if (!existing)
+          this.db
+            .prepare("INSERT INTO pedigree_snapshots VALUES(?,?,?)")
+            .run(snapshot.id, projectId, JSON.stringify(snapshot));
+      }
+      // The archive was validated as a whole before writing. Gap references can
+      // now resolve against the imported assumptions and methods in this transaction.
+      for (const task of data.tasks) this.saveTask(task);
+      validatePedigreeState(this.pedigreeState(projectId), projectId);
     });
   }
 }
@@ -775,11 +1622,12 @@ export class ResearchStore {
 export function validateResearchArchive(
   value: unknown,
   projectId: string,
+  snapshotState?: PedigreeState,
 ): ResearchArchive {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid research archive.");
   const raw = value as Record<string, unknown>;
-  if (raw.schemaVersion !== 2)
+  if (raw.schemaVersion !== 2 && raw.schemaVersion !== 3)
     throw new Error("Unsupported research archive version.");
   const arr = (key: string, max = 100_000): Record<string, unknown>[] => {
     const v = raw[key];
@@ -945,6 +1793,9 @@ export function validateResearchArchive(
     title: text(t.title),
     question: text(t.question),
     claimId: t.claimId === undefined ? undefined : ident(t.claimId),
+    assumptionId:
+      t.assumptionId === undefined ? undefined : ident(t.assumptionId),
+    methodId: t.methodId === undefined ? undefined : ident(t.methodId),
     status: choice(t.status, ["planned", "doing", "blocked", "complete"]),
     dueDate: optional(t.dueDate),
     criterion: text(t.criterion),
@@ -989,6 +1840,59 @@ export function validateResearchArchive(
       exclusions: r.exclusions.map((v) => text(v)),
       response: text(r.response),
       status: choice(r.status, ["completed", "failed", "cancelled"]),
+      ...(r.passages !== undefined
+        ? {
+            passages: (() => {
+              if (!Array.isArray(r.passages) || r.passages.length > 100_000)
+                throw new Error("Invalid retrieved passages.");
+              return r.passages.map((entry) => {
+                const saved = passageMap.get(ident((entry as Passage)?.id));
+                if (
+                  !saved ||
+                  saved.text !== (entry as Passage).text ||
+                  saved.versionId !== (entry as Passage).versionId
+                )
+                  throw new Error(
+                    "Retrieved passage differs from saved evidence.",
+                  );
+                return saved;
+              });
+            })(),
+          }
+        : {}),
+      ...(r.queries !== undefined
+        ? {
+            queries: (() => {
+              const q = r.queries as Record<string, unknown>;
+              const entries = (value: unknown) => {
+                if (!Array.isArray(value) || value.length > 100)
+                  throw new Error("Invalid retrieval queries.");
+                return value.map((entry) => text(entry, 10000));
+              };
+              return {
+                support: entries(q.support),
+                counter: entries(q.counter),
+                gaps: entries(q.gaps),
+              };
+            })(),
+          }
+        : {}),
+      ...(r.groundingWarnings !== undefined
+        ? {
+            groundingWarnings: (() => {
+              if (
+                !Array.isArray(r.groundingWarnings) ||
+                r.groundingWarnings.length > 10_000
+              )
+                throw new Error("Invalid grounding warnings.");
+              return r.groundingWarnings.map((entry) => text(entry, 10000));
+            })(),
+          }
+        : {}),
+      ...(r.pedigreeSnapshotId !== undefined
+        ? { pedigreeSnapshotId: ident(r.pedigreeSnapshotId) }
+        : {}),
+      ...validatedRunAudit(r, passageMap, sourceMap),
     };
   });
   const discoveries: DiscoveryCandidate[] = arr("discoveries").map((d) => ({
@@ -1008,8 +1912,119 @@ export function validateResearchArchive(
   for (const task of tasks)
     if (task.sourceIds.some((id) => !sourceMap.has(id)))
       throw new Error("Task refers to a missing source.");
+  let pedigree = emptyPedigreeState();
+  let pedigreeRevisions: PedigreeRevision[] = [];
+  let pedigreeSnapshots: PedigreeSnapshot[] = [];
+  if (raw.schemaVersion === 3) {
+    const state = raw.pedigree as Record<string, unknown> | undefined;
+    if (!state || typeof state !== "object")
+      throw new Error("Version 3 archive is missing pedigree records.");
+    const rebased: Record<string, unknown> = {};
+    for (const key of Object.values(PEDIGREE_COLLECTIONS)) {
+      const rows = state[key];
+      if (!Array.isArray(rows))
+        throw new Error("Invalid pedigree archive collection.");
+      rebased[key] = rows.map((entity) => ({ ...entity, projectId }));
+    }
+    pedigree = validatePedigreeState(rebased, projectId);
+    validatePedigreeReferences(pedigree, {
+      sources,
+      versions,
+      passages,
+      claims,
+      tasks,
+    });
+    pedigreeRevisions = arr("pedigreeRevisions").map((record) => {
+      const kind = choice(
+        record.kind,
+        Object.keys(PEDIGREE_COLLECTIONS) as PedigreeEntityKind[],
+      );
+      const data = validatePedigreeEntity(
+        kind,
+        { ...(record.data as object), projectId },
+        projectId,
+      );
+      const revision = n(record.revision),
+        entityId = ident(record.entityId),
+        createdAt = timestamp(record.createdAt);
+      if (
+        revision < 1 ||
+        data.revision !== revision ||
+        data.id !== entityId ||
+        data.updatedAt !== createdAt
+      )
+        throw new Error("Invalid immutable pedigree revision.");
+      return {
+        id: ident(record.id),
+        projectId,
+        entityId,
+        kind,
+        revision,
+        createdAt,
+        data,
+      };
+    });
+    if (
+      new Set(pedigreeRevisions.map((revision) => revision.id)).size !==
+        pedigreeRevisions.length ||
+      new Set(
+        pedigreeRevisions.map(
+          (revision) => `${revision.entityId}:${revision.revision}`,
+        ),
+      ).size !== pedigreeRevisions.length
+    )
+      throw new Error("Duplicate pedigree revisions.");
+    for (const [kind, key] of Object.entries(PEDIGREE_COLLECTIONS) as [
+      PedigreeEntityKind,
+      keyof PedigreeState,
+    ][])
+      for (const entity of pedigree[key]) {
+        const revision = pedigreeRevisions.find(
+          (revision) =>
+            revision.kind === kind &&
+            revision.entityId === entity.id &&
+            revision.revision === entity.revision,
+        );
+        if (!revision || stableJSON(revision.data) !== stableJSON(entity))
+          throw new Error(
+            "Current pedigree record does not match its immutable revision.",
+          );
+      }
+    pedigreeSnapshots = arr("pedigreeSnapshots", 10_000).map((snapshot) =>
+      validatePedigreeSnapshot(snapshot, projectId),
+    );
+    if (
+      new Set(pedigreeSnapshots.map((snapshot) => snapshot.id)).size !==
+      pedigreeSnapshots.length
+    )
+      throw new Error("Duplicate pedigree snapshots.");
+    for (const run of runs)
+      if (
+        run.pedigreeSnapshotId &&
+        !pedigreeSnapshots.some(
+          (snapshot) => snapshot.id === run.pedigreeSnapshotId,
+        )
+      )
+        throw new Error("Analysis run refers to a missing pedigree snapshot.");
+  }
+  if (
+    raw.schemaVersion === 2 &&
+    tasks.some((task) => task.assumptionId || task.methodId)
+  ) {
+    if (!snapshotState)
+      throw new Error(
+        "Legacy archive task refers to missing pedigree records.",
+      );
+    validatePedigreeReferences(snapshotState, {
+      sources,
+      versions,
+      passages,
+      claims,
+      tasks,
+    });
+  }
   return {
-    schemaVersion: 2,
+    schemaVersion: raw.schemaVersion,
     sources,
     versions,
     passages,
@@ -1018,5 +2033,8 @@ export function validateResearchArchive(
     runs,
     discoveries,
     jobs: [],
+    pedigree,
+    pedigreeRevisions,
+    pedigreeSnapshots,
   };
 }

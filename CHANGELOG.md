@@ -2,6 +2,23 @@
 
 Acadia follows a 0.x early-access release series. Entries describe application changes; platform validation is recorded separately in each release. Earlier versions were distributed as local development packages before the public repository.
 
+## 0.4.0
+
+- Added versioned research briefs, source appraisals, confirmed shared origins, finding assessments and an assumptions register. Citation integrity, evidence support and qualitative confidence remain separate.
+- Added competing-hypotheses, SWOT, root-cause, risk and technology-readiness worksheets with shared evidence, assumptions and gap tasks.
+- Exposed all five research methods in the Collector's Add item dialog; each creates a linked board card with an Open worksheet action.
+- Added explicit Challenge analysis, validated review proposals, balanced retrieval with omission records, and quotation checks associated with the cited reference.
+- Added historical pedigree inspection, editable analytical appendices, release limitation review, reproducible sanitized model inputs and portable archive format v3 with recoverable migration.
+- Added deliverable project plans for software, curriculum and other interventions; editable work packages export to Monday/Jira CSV and Planner integration packages.
+- Added linked Power BI research-data tables, a data dictionary and relationship/import guidance.
+
+- Reworked the desktop workspace around a compact navigation sidebar, contextual source reader, and document-first Releaser. Retained the approved Acadia identity and explicit released-display boundary.
+- Added System/Light/Dark appearance, comfortable/compact/touch controls, platform menus and shortcuts, command search, investigation search, and restored window geometry with display-disconnection recovery.
+- Preserved board viewport and report editing context across view changes; added keyboard board connections and bounded source-reader pages that retain exact historical citation navigation.
+- Added named connection presets without credentials, deliberate model inventory checks, and explicit local-versus-server/cloud setup guidance.
+- Coalesced research refreshes and moved derived Markdown serialization out of the typing path while retaining synchronous report-document updates and save-on-close protections.
+- Added native GUI regression coverage. Native Windows/Ubuntu, assistive-technology, and physical touchscreen/mixed-display acceptance remain separate from automated macOS checks.
+
 ## 0.3.0
 
 ### Added

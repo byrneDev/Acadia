@@ -7,8 +7,10 @@ import type {
   Relation,
   ResearchCard,
   ResearchOutput,
+  ProjectPlanContext,
 } from "./types";
 import type { Citation, ReportDocument } from "./research";
+import { validateDeliveryPlan } from "./pmis";
 
 export const OUTPUT_LABELS: Record<OutputKind, string> = {
   hypothesis: "Hypothesis",
@@ -17,6 +19,7 @@ export const OUTPUT_LABELS: Record<OutputKind, string> = {
   "gap-analysis": "Gap analysis",
   "needs-analysis": "Needs analysis",
   "decision-brief": "Decision brief",
+  "project-plan": "Deliverable project plan",
 };
 
 const CARD_KINDS: CardKind[] = [
@@ -44,7 +47,7 @@ const ASSET_ID =
 export function createBlankProject(): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     privacy: { mode: "local" },
     groups: [],
     views: [],
@@ -269,8 +272,8 @@ function optionalText(
 /** Validate and reconstruct an import. Unknown fields never enter trusted app state. */
 export function validateProject(value: unknown): Project {
   const p = object(value, "root");
-  if (p.schemaVersion !== 1 && p.schemaVersion !== 2)
-    fail("schemaVersion", "is not supported (expected 1 or 2)");
+  if (p.schemaVersion !== 1 && p.schemaVersion !== 2 && p.schemaVersion !== 3)
+    fail("schemaVersion", "is not supported (expected 1, 2, or 3)");
   let textSize = 0;
   const budget = (amount: number): void => {
     textSize += amount;
@@ -325,6 +328,10 @@ export function validateProject(value: unknown): Project {
           c.sourceId === undefined
             ? undefined
             : id(c.sourceId, `${path}.sourceId`),
+        methodId:
+          c.methodId === undefined
+            ? undefined
+            : id(c.methodId, `${path}.methodId`),
         createdAt: date(c.createdAt, `${path}.createdAt`),
         updatedAt: date(c.updatedAt, `${path}.updatedAt`),
       };
@@ -397,6 +404,16 @@ export function validateProject(value: unknown): Project {
                 validateCitation(v, `${path}.citations[${i}]`),
               ),
         runId: o.runId === undefined ? undefined : id(o.runId, `${path}.runId`),
+        pedigreeSnapshotId:
+          o.pedigreeSnapshotId === undefined
+            ? undefined
+            : id(o.pedigreeSnapshotId, `${path}.pedigreeSnapshotId`),
+        plan:
+          o.plan === undefined ? undefined : validateProjectPlanContext(o.plan),
+        deliveryPlan:
+          o.deliveryPlan === undefined
+            ? undefined
+            : validateDeliveryPlan(o.deliveryPlan),
         document:
           o.document === undefined
             ? undefined
@@ -419,6 +436,40 @@ export function validateProject(value: unknown): Project {
                     10000,
                   ).map((v) => validateCitation(v)),
                   note: string(r.note, "revision note", 10000),
+                  pedigreeSnapshotId:
+                    r.pedigreeSnapshotId === undefined
+                      ? undefined
+                      : id(r.pedigreeSnapshotId, "revision pedigree snapshot"),
+                  plan:
+                    r.plan === undefined
+                      ? undefined
+                      : validateProjectPlanContext(r.plan),
+                  deliveryPlan:
+                    r.deliveryPlan === undefined
+                      ? undefined
+                      : validateDeliveryPlan(r.deliveryPlan),
+                  review:
+                    r.review === undefined
+                      ? undefined
+                      : (() => {
+                          const review = object(r.review, "revision review");
+                          if (typeof review.acknowledged !== "boolean")
+                            fail(
+                              "revision review acknowledgement",
+                              "must be boolean",
+                            );
+                          return {
+                            checkedAt: date(review.checkedAt, "review date"),
+                            warnings: array(
+                              review.warnings,
+                              "review warnings",
+                              1000,
+                            ).map((warning) =>
+                              string(warning, "review warning", 10000),
+                            ),
+                            acknowledged: review.acknowledged as boolean,
+                          };
+                        })(),
                 };
               }),
         releasedRevisionId:
@@ -548,6 +599,45 @@ export function validateProject(value: unknown): Project {
     outputs,
     createdAt: date(p.createdAt, "createdAt"),
     updatedAt: date(p.updatedAt, "updatedAt"),
+  };
+}
+
+export function validateProjectPlanContext(value: unknown): ProjectPlanContext {
+  const p = object(value, "project plan context");
+  return {
+    analysisOutputId: id(p.analysisOutputId, "analysis output"),
+    analysisRevisionId:
+      p.analysisRevisionId === undefined
+        ? undefined
+        : id(p.analysisRevisionId, "analysis revision"),
+    gapClaimId:
+      p.gapClaimId === undefined ? undefined : id(p.gapClaimId, "gap finding"),
+    gap: string(p.gap, "gap", 30000),
+    deliverableType: member(
+      p.deliverableType,
+      ["software", "curriculum", "other"] as const,
+      "deliverable type",
+    ),
+    deliverable: string(p.deliverable, "deliverable", 30000),
+    acceptanceCriteria: string(
+      p.acceptanceCriteria,
+      "acceptance criteria",
+      30000,
+    ),
+    analysisTitle:
+      p.analysisTitle === undefined
+        ? undefined
+        : string(p.analysisTitle, "analysis title", 2000),
+    analysisMarkdown:
+      p.analysisMarkdown === undefined
+        ? undefined
+        : string(p.analysisMarkdown, "analysis snapshot", 1_000_000),
+    analysisCitations:
+      p.analysisCitations === undefined
+        ? undefined
+        : array(p.analysisCitations, "analysis citations", 10000).map((v) =>
+            validateCitation(v),
+          ),
   };
 }
 

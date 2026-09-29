@@ -89,6 +89,24 @@ export default function ReportEditor({
   const requestedSelection = useRef<Selection | null>(null);
   const mounted = useRef(true);
   const revisionsCitations = useRef<Citation[] | null>(null);
+  const lastDocument = useRef(output.document);
+  const markdownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingMarkdown = useRef<ReportDocument | null>(null);
+
+  const flushMarkdown = () => {
+    if (markdownTimer.current) clearTimeout(markdownTimer.current);
+    markdownTimer.current = null;
+    const document = pendingMarkdown.current;
+    pendingMarkdown.current = null;
+    const latest = current.current.output;
+    // A newer revision or externally replaced document always wins.
+    if (!document || latest.document !== document) return;
+    const markdown = reportToMarkdown(document, reportCitations(latest));
+    if (markdown === latest.markdown) return;
+    const next = { ...latest, markdown };
+    current.current.output = next;
+    current.current.onChange(next);
+  };
 
   const openCitation = (id: string) => {
     const citation = reportCitations(current.current.output).find(
@@ -160,11 +178,19 @@ export default function ReportEditor({
           ...current.current.output,
           document,
           citations,
-          markdown: reportToMarkdown(document, citations),
+          // Structured content is canonical and is saved immediately. Markdown
+          // is a derived export cache; batching it avoids walking a long report
+          // on every keystroke. Export/revision boundaries also derive it fresh.
+          markdown: current.current.output.markdown,
         };
+        lastDocument.current = document;
+        pendingMarkdown.current = document;
         current.current.output = next;
         current.current.onChange(next);
+        if (markdownTimer.current) clearTimeout(markdownTimer.current);
+        markdownTimer.current = setTimeout(flushMarkdown, 350);
       },
+      onBlur: flushMarkdown,
       onSelectionUpdate: ({ editor: updated }) => {
         const { from, to } = updated.state.selection;
         if (from === to) return;
@@ -185,14 +211,40 @@ export default function ReportEditor({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      flushMarkdown();
     };
   }, []);
   useEffect(() => {
     if (!editor) return;
+    if (output.document && output.document === lastDocument.current) return;
     const document = reportDocument(output);
-    if (JSON.stringify(editor.getJSON()) !== JSON.stringify(document))
+    if (JSON.stringify(editor.getJSON()) !== JSON.stringify(document)) {
+      pendingMarkdown.current = null;
+      if (markdownTimer.current) clearTimeout(markdownTimer.current);
+      markdownTimer.current = null;
       editor.commands.setContent(document, { emitUpdate: false });
+    }
+    lastDocument.current = output.document;
   }, [editor, output.document, output.markdown]);
+
+  useEffect(() => {
+    if (!editor || readOnly) return;
+    const command = (event: Event) => {
+      if (!editor.view.dom.contains(document.activeElement)) return;
+      const action = (event as CustomEvent<string>).detail;
+      if (action === "undo") editor.commands.undo();
+      if (action === "redo") editor.commands.redo();
+    };
+    const flush = () => flushMarkdown();
+    window.addEventListener("acadia:editor-command", command);
+    window.addEventListener("acadia:flush-report", flush);
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("acadia:editor-command", command);
+      window.removeEventListener("acadia:flush-report", flush);
+      window.removeEventListener("beforeunload", flush);
+    };
+  }, [editor, readOnly]);
 
   useEffect(() => {
     if (!jobId || !window.acadia) return;
@@ -366,6 +418,8 @@ export default function ReportEditor({
           >
             <button
               type="button"
+              aria-label="Heading 1"
+              aria-pressed={editor.isActive("heading", { level: 1 })}
               onClick={() =>
                 editor.chain().focus().toggleHeading({ level: 1 }).run()
               }
@@ -374,6 +428,8 @@ export default function ReportEditor({
             </button>
             <button
               type="button"
+              aria-label="Heading 2"
+              aria-pressed={editor.isActive("heading", { level: 2 })}
               onClick={() =>
                 editor.chain().focus().toggleHeading({ level: 2 }).run()
               }
@@ -388,12 +444,14 @@ export default function ReportEditor({
             </button>
             <button
               type="button"
+              aria-pressed={editor.isActive("bold")}
               onClick={() => editor.chain().focus().toggleBold().run()}
             >
               <b>Bold</b>
             </button>
             <button
               type="button"
+              aria-pressed={editor.isActive("italic")}
               onClick={() => editor.chain().focus().toggleItalic().run()}
             >
               <i>Italic</i>
@@ -459,7 +517,7 @@ export default function ReportEditor({
               Redo
             </button>
             {citations.length > 0 && (
-              <>
+              <span className="report-citation-tools">
                 <select
                   aria-label="Insert source citation"
                   value={citationId}
@@ -495,7 +553,7 @@ export default function ReportEditor({
                 >
                   Insert
                 </button>
-              </>
+              </span>
             )}
           </div>
           <details className="report-section-tools">

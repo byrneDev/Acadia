@@ -1,0 +1,14 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Acadia" type="js.build_tools.npm">
+    <package-json value="$PROJECT_DIR$/package.json" />
+    <command value="run" />
+    <scripts>
+      <script value="dev" />
+    </scripts>
+    <node-interpreter value="node" />
+    <envs>
+      <env name="ACADIA_USER_DATA" value="$PROJECT_DIR$/tmp/acadia-dev" />
+    </envs>
+    <method v="2" />
+  </configuration>
+</component>

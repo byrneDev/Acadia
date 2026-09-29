@@ -1,6 +1,20 @@
 import type { ProjectPrivacy } from "../../shared/research";
-import { useEffect, useRef, useState } from "react";
-import { X, ArrowUpRight, Trash2, FileUp, Monitor } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, useId } from "react";
+import {
+  X,
+  ArrowUpRight,
+  Trash2,
+  FileUp,
+  Monitor,
+  GitCompareArrows,
+  LayoutGrid,
+  GitBranch,
+  ShieldAlert,
+  Rocket,
+  Layers,
+} from "lucide-react";
+import { METHOD_REGISTRY, type MethodKind } from "../../shared/pedigree";
+import "./CardDialog.css";
 import type {
   AISettings,
   CardKind,
@@ -25,16 +39,33 @@ export function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  const opener = useRef(document.activeElement);
+  const titleId = useId();
+  const subtitleId = useId();
+  useLayoutEffect(() => {
     const d = ref.current!;
     d.showModal();
-    return () => d.close();
+    d.querySelector<HTMLElement>("[data-autofocus]")?.focus();
+    return () => {
+      d.close();
+      if (
+        opener.current instanceof HTMLElement &&
+        opener.current.isConnected &&
+        !document.querySelector("dialog[open]")
+      )
+        opener.current.focus({ preventScroll: true });
+    };
   }, []);
   return (
     <dialog
       ref={ref}
+      aria-labelledby={titleId}
+      aria-describedby={subtitle ? subtitleId : undefined}
       className={`modal ${wide ? "wide" : ""}`}
-      onCancel={onClose}
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -42,8 +73,12 @@ export function Modal({
       <div className="modal-head">
         <div>
           <span className="eyebrow">ACADIA / WORKSPACE</span>
-          <h2>{title}</h2>
-          {subtitle && <p className="muted">{subtitle}</p>}
+          <h2 id={titleId}>{title}</h2>
+          {subtitle && (
+            <p id={subtitleId} className="muted">
+              {subtitle}
+            </p>
+          )}
         </div>
         <button
           className="icon-button"
@@ -58,32 +93,85 @@ export function Modal({
   );
 }
 const kinds: CardKind[] = ["note", "question", "hypothesis", "link"];
+const methodIcons = {
+  hypotheses: GitCompareArrows,
+  swot: LayoutGrid,
+  "root-cause": GitBranch,
+  risk: ShieldAlert,
+  trl: Rocket,
+};
 export function CardDialog({
   initial,
   onSave,
   onClose,
   onImport,
+  onSaveMethod,
 }: {
   initial?: ResearchCard;
   onSave: (values: Partial<ResearchCard>) => void;
   onClose: () => void;
   onImport: () => void;
+  onSaveMethod: (values: {
+    kind: MethodKind;
+    title: string;
+    objective: string;
+    tags: string[];
+  }) => Promise<void>;
 }) {
   const [kind, setKind] = useState<CardKind>(initial?.kind || "note");
+  const [methodKind, setMethodKind] = useState<MethodKind>();
+  const method = METHOD_REGISTRY.find((entry) => entry.kind === methodKind);
   const [title, setTitle] = useState(initial?.title || "");
   const [content, setContent] = useState(initial?.content || "");
   const [url, setUrl] = useState(initial?.url || "");
   const [tags, setTags] = useState(initial?.tags.join(", ") || "");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const close = () => {
+    if (!saving) onClose();
+  };
   return (
     <Modal
       title={initial ? "Edit research item" : "Add to the Collector"}
-      subtitle="Capture the idea. Follow the connection."
-      onClose={onClose}
+      subtitle={
+        initial
+          ? "Capture the idea. Follow the connection."
+          : "Capture an idea or add a linked research worksheet."
+      }
+      onClose={close}
+      wide={!initial}
     >
       <form
-        onSubmit={(e) => {
+        className={!initial ? "collector-add-form" : undefined}
+        onSubmit={async (e) => {
           e.preventDefault();
+          if (saving) return;
+          const parsedTags = tags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean)
+            .slice(0, 20);
+          if (method) {
+            setSaving(true);
+            setError("");
+            try {
+              await onSaveMethod({
+                kind: method.kind,
+                title: title.trim() || method.label,
+                objective: content,
+                tags: parsedTags,
+              });
+            } catch (error) {
+              setError(
+                error instanceof Error
+                  ? error.message
+                  : "The worksheet could not be added. Your draft is still here; try again.",
+              );
+            } finally {
+              setSaving(false);
+            }
+            return;
+          }
           if (!title.trim()) return;
           if (kind === "link") {
             try {
@@ -99,92 +187,159 @@ export function CardDialog({
             title: title.trim(),
             content,
             url: kind === "link" ? url : undefined,
-            tags: tags
-              .split(",")
-              .map((t) => t.trim())
-              .filter(Boolean)
-              .slice(0, 20),
+            tags: parsedTags,
           });
         }}
       >
         {!initial && (
-          <div className="kind-picker">
-            {kinds.map((k) => {
-              const Icon = cardIcons[k];
-              return (
-                <button
-                  type="button"
-                  className={kind === k ? "active" : ""}
-                  onClick={() => setKind(k)}
-                  key={k}
-                >
-                  <Icon size={19} />
-                  {k}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <label className="field">
-          Title
-          <input
-            autoFocus
-            required
-            maxLength={300}
-            placeholder={
-              kind === "question"
-                ? "What do we need to understand?"
-                : "Give this item a clear title"
-            }
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </label>
-        {kind === "link" && (
-          <label className="field">
-            Source URL
-            <input
-              required
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://…"
-            />
-          </label>
-        )}
-        <label className="field">
-          {kind === "hypothesis"
-            ? "Working hypothesis"
-            : "Notes & observations"}
-          <textarea
-            rows={6}
-            value={content}
-            maxLength={100000}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="What makes this useful? Add context, excerpts, or the next question."
-          />
-        </label>
-        <label className="field">
-          Tags <span className="muted">separate with commas</span>
-          <input
-            value={tags}
-            maxLength={500}
-            onChange={(e) => setTags(e.target.value)}
-            placeholder="research, methodology, follow-up"
-          />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <div className="modal-actions">
-          {!initial && (
-            <button className="button quiet" type="button" onClick={onImport}>
+          <aside className="collector-add-options" aria-label="Item types">
+            <fieldset disabled={saving}>
+              <legend>Capture</legend>
+              <div className="kind-picker">
+                {kinds.map((k) => {
+                  const Icon = cardIcons[k];
+                  return (
+                    <button
+                      type="button"
+                      className={!methodKind && kind === k ? "active" : ""}
+                      aria-pressed={!methodKind && kind === k}
+                      onClick={() => {
+                        setKind(k);
+                        setMethodKind(undefined);
+                        setError("");
+                      }}
+                      key={k}
+                    >
+                      <Icon size={19} />
+                      {k}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <fieldset disabled={saving}>
+              <legend>Research methods</legend>
+              <div className="collector-method-picker">
+                {METHOD_REGISTRY.map((entry) => {
+                  const Icon = methodIcons[entry.kind];
+                  return (
+                    <button
+                      key={entry.kind}
+                      type="button"
+                      aria-pressed={methodKind === entry.kind}
+                      className={methodKind === entry.kind ? "active" : ""}
+                      onClick={() => {
+                        setMethodKind(entry.kind);
+                        setError("");
+                      }}
+                    >
+                      <Icon size={18} aria-hidden="true" />
+                      <span>{entry.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <button
+              className="button quiet collector-import"
+              type="button"
+              disabled={saving}
+              onClick={onImport}
+            >
               <FileUp size={16} />
               Import files
             </button>
+            <p className="muted collector-import-note">
+              Documents, images, audio, and video
+            </p>
+          </aside>
+        )}
+        <fieldset className="collector-add-details" disabled={saving}>
+          {method && (
+            <div className="collector-method-description">
+              <h3>{method.label}</h3>
+              <p>{method.description}</p>
+              <p className="muted">
+                Adds a card linked to an editable worksheet. Open it from the
+                board to add evidence, assumptions, and follow-up tasks. Works
+                without AI.
+              </p>
+            </div>
           )}
-          <button type="submit" className="button primary">
-            {initial ? "Save changes" : "Add item"}
-          </button>
-        </div>
+          <label className="field">
+            Title
+            <input
+              autoFocus
+              data-autofocus
+              required={!method}
+              maxLength={300}
+              placeholder={
+                method
+                  ? method.label
+                  : kind === "question"
+                    ? "What do we need to understand?"
+                    : "Give this item a clear title"
+              }
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </label>
+          {!method && kind === "link" && (
+            <label className="field">
+              Source URL
+              <input
+                required
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://…"
+              />
+            </label>
+          )}
+          <label className="field">
+            {method
+              ? "Worksheet objective"
+              : kind === "hypothesis"
+                ? "Working hypothesis"
+                : "Notes & observations"}
+            <textarea
+              rows={method ? 4 : 6}
+              value={content}
+              maxLength={100000}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder={
+                method
+                  ? "What question or decision will this worksheet help you examine?"
+                  : "What makes this useful? Add context, excerpts, or the next question."
+              }
+            />
+          </label>
+          <label className="field">
+            Tags <span className="muted">separate with commas</span>
+            <input
+              value={tags}
+              maxLength={500}
+              onChange={(e) => setTags(e.target.value)}
+              placeholder="research, methodology, follow-up"
+            />
+          </label>
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="modal-actions">
+            <button type="submit" className="button primary">
+              {saving
+                ? "Adding worksheet…"
+                : initial
+                  ? "Save changes"
+                  : method
+                    ? "Add worksheet to board"
+                    : "Add item"}
+            </button>
+          </div>
+        </fieldset>
       </form>
     </Modal>
   );
@@ -198,6 +353,7 @@ export function Inspector({
   onChange,
   onDelete,
   onSource,
+  onMethod,
   onConnection,
   onError,
 }: {
@@ -209,10 +365,11 @@ export function Inspector({
   onChange: (v: Partial<ResearchCard>) => void;
   onDelete: () => void;
   onSource: (id: string) => void;
+  onMethod?: (id: string) => void;
   onConnection: (c: Connection) => void;
   onError: (e: unknown) => void;
 }) {
-  const Icon = cardIcons[card.kind];
+  const Icon = card.methodId ? Layers : cardIcons[card.kind];
   return (
     <aside className="inspector">
       <div className="panel-heading">
@@ -228,9 +385,17 @@ export function Inspector({
       <div className="inspector-content">
         <span className={`kind-badge kind-${card.kind}`}>
           <Icon size={14} />
-          {card.kind}
+          {card.methodId ? "Research method" : card.kind}
         </span>
         <h2>{card.title}</h2>
+        {card.methodId && onMethod && (
+          <button
+            className="button primary full"
+            onClick={() => onMethod(card.methodId!)}
+          >
+            Open worksheet
+          </button>
+        )}
         {card.kind === "image" && card.assetId && (
           <img
             className="inspector-image"
@@ -418,6 +583,97 @@ export function SettingsDialog({
   onClose: () => void;
 }) {
   const [s, set] = useState({ ...settings, apiKey: "" });
+  type Preset = {
+    id: string;
+    name: string;
+    provider: AISettings["provider"];
+    endpoint: string;
+    model: string;
+    mode: ProjectPrivacy["mode"];
+  };
+  const [presets, setPresets] = useState<Preset[]>(() => {
+    try {
+      const rows = JSON.parse(
+        localStorage.getItem("acadia-connection-presets") || "[]",
+      );
+      return Array.isArray(rows)
+        ? rows
+            .filter(
+              (p) =>
+                p &&
+                typeof p.id === "string" &&
+                typeof p.name === "string" &&
+                typeof p.endpoint === "string" &&
+                typeof p.model === "string" &&
+                ["offline", "ollama", "compatible"].includes(p.provider) &&
+                ["local", "cloud"].includes(p.mode),
+            )
+            .slice(0, 20)
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              provider: p.provider,
+              endpoint: p.endpoint,
+              model: p.model,
+              mode: p.mode,
+            }))
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  const [presetName, setPresetName] = useState("");
+  const [models, setModels] = useState<string[]>([]);
+  const [diagnostic, setDiagnostic] = useState("");
+  const [checking, setChecking] = useState(false);
+  const requestId = useRef(0);
+  useEffect(() => {
+    requestId.current++;
+    setModels([]);
+    setDiagnostic("");
+    setChecking(false);
+  }, [s.endpoint, s.provider]);
+  useEffect(() => {
+    requestId.current++;
+    setDiagnostic("");
+    setChecking(false);
+  }, [s.model]);
+  useEffect(
+    () => () => {
+      requestId.current++;
+    },
+    [],
+  );
+  const check = async (inventory: boolean) => {
+    const id = ++requestId.current;
+    setChecking(true);
+    setError("");
+    setDiagnostic("");
+    try {
+      if (inventory) {
+        if (!window.acadia?.listLocalModels)
+          throw new Error("Restart Acadia to enable model discovery.");
+        const result = await window.acadia.listLocalModels(s.endpoint);
+        if (requestId.current !== id) return;
+        setModels(result.map((m) => m.name));
+        setDiagnostic(
+          result.length
+            ? "Installed models found. Choose one below."
+            : "The server is reachable, but no models are installed.",
+        );
+      } else {
+        if (!window.acadia?.testAIConnection)
+          throw new Error("Restart Acadia to enable connection checks.");
+        const result = await window.acadia.testAIConnection(s);
+        if (requestId.current === id) setDiagnostic(result.message);
+      }
+    } catch (e) {
+      if (requestId.current === id)
+        setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (requestId.current === id) setChecking(false);
+    }
+  };
   const [mode, setMode] = useState(privacy.mode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -425,7 +681,9 @@ export function SettingsDialog({
     <Modal
       title="Research engine"
       subtitle="Choose where the Releaser develops your research."
-      onClose={onClose}
+      onClose={() => {
+        if (!busy) onClose();
+      }}
     >
       <form
         onSubmit={async (e) => {
@@ -458,6 +716,34 @@ export function SettingsDialog({
           }
         }}
       >
+        <div className="connection-presets">
+          <label className="field">
+            Saved connection
+            <select
+              aria-label="Saved connection"
+              defaultValue=""
+              onChange={(e) => {
+                const p = presets.find((p) => p.id === e.target.value);
+                if (!p) return;
+                set({
+                  provider: p.provider,
+                  endpoint: p.endpoint,
+                  model: p.model,
+                  apiKey: "",
+                });
+                setMode(p.mode);
+                setPresetName(p.name);
+              }}
+            >
+              <option value="">Choose a connection…</option>
+              {presets.map((p) => (
+                <option value={p.id} key={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="privacy-settings">
           <label className="field">
             Analysis privacy for this project
@@ -468,12 +754,12 @@ export function SettingsDialog({
               }
             >
               <option value="local">Local — this computer only</option>
-              <option value="cloud">Cloud — selected provider</option>
+              <option value="cloud">Server or cloud — selected provider</option>
             </select>
           </label>
           <p>
             {mode === "local"
-              ? "Document passages stay on this computer. Local model endpoints must use localhost."
+              ? "Use this only for a model running on this computer. For a remote server, including an SSH tunnel, choose server or cloud analysis."
               : "Included passages may be sent to the provider below when you start analysis."}{" "}
             External web discovery always requires its own approved plan.
           </p>
@@ -493,7 +779,8 @@ export function SettingsDialog({
                     : provider === "compatible"
                       ? "https://api.openai.com/v1"
                       : "",
-                model: provider === "ollama" ? "llama3.2" : "",
+                model: "",
+                apiKey: "",
               });
             }}
           >
@@ -530,6 +817,25 @@ export function SettingsDialog({
                 placeholder="Enter an installed or provider-supported model"
               />
             </label>
+            {models.length > 0 && (
+              <label className="field">
+                Installed models
+                <select
+                  aria-label="Installed models"
+                  value={models.includes(s.model) ? s.model : ""}
+                  onChange={(e) => set({ ...s, model: e.target.value })}
+                >
+                  <option value="" disabled>
+                    Choose an installed model…
+                  </option>
+                  {models.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {s.provider === "compatible" && (
               <label className="field">
                 API key{" "}
@@ -544,6 +850,27 @@ export function SettingsDialog({
                 />
               </label>
             )}
+            <div className="connection-diagnostics">
+              {s.provider === "ollama" && (
+                <button
+                  type="button"
+                  className="button quiet"
+                  disabled={checking || !s.endpoint}
+                  onClick={() => void check(true)}
+                >
+                  Find installed models
+                </button>
+              )}
+              <button
+                type="button"
+                className="button quiet"
+                disabled={checking || !s.endpoint || !s.model}
+                onClick={() => void check(false)}
+              >
+                {checking ? "Checking…" : "Test connection"}
+              </button>
+              {diagnostic && <p role="status">{diagnostic}</p>}
+            </div>
             <p className="settings-note">
               Your question, retrieved source passages, and instructions are
               sent to this server when you start analysis. Source content is
@@ -552,7 +879,68 @@ export function SettingsDialog({
             </p>
           </>
         )}
-        {error && <p className="error">{error}</p>}
+        <details className="connection-remember">
+          <summary>Remember this connection</summary>
+          <div className="connection-presets">
+            <label className="field">
+              Connection name
+              <input
+                value={presetName}
+                maxLength={80}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder="This Mac, Research server, OpenAI…"
+              />
+            </label>
+            <button
+              type="button"
+              className="button quiet"
+              disabled={!presetName.trim()}
+              onClick={() => {
+                try {
+                  if (s.provider !== "offline") {
+                    const url = new URL(s.endpoint);
+                    if (url.username || url.password || url.search || url.hash)
+                      throw new Error(
+                        "Use a server URL without credentials or query parameters.",
+                      );
+                  }
+                  const next = [
+                    ...presets.filter((p) => p.name !== presetName.trim()),
+                    {
+                      id: crypto.randomUUID(),
+                      name: presetName.trim(),
+                      provider: s.provider,
+                      endpoint: s.endpoint,
+                      model: s.model,
+                      mode,
+                    },
+                  ].slice(-20);
+                  localStorage.setItem(
+                    "acadia-connection-presets",
+                    JSON.stringify(next),
+                  );
+                  setPresets(next);
+                  setDiagnostic(
+                    "Connection remembered. API keys are not included in connection presets.",
+                  );
+                } catch (e) {
+                  setError(String(e));
+                }
+              }}
+            >
+              Remember
+            </button>
+          </div>
+          <p className="muted">
+            Presets remember the server, model, and privacy choice. API keys
+            remain in the app’s protected credential settings.
+          </p>
+        </details>
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
         <div className="modal-actions">
           <button disabled={busy} className="button primary" type="submit">
             {busy ? "Saving…" : "Save engine"}

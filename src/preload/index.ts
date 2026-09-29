@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { AcadiaAPI, Project } from "../shared/types";
+import type { DesktopCommand, DesktopState } from "../shared/desktop";
 
 let beforeClose: (() => Promise<void>) | undefined;
 ipcRenderer.on("acadia:before-close", async () => {
@@ -17,6 +18,54 @@ ipcRenderer.on("acadia:before-close", async () => {
 });
 
 const api: AcadiaAPI = {
+  pedigreeState: () => ipcRenderer.invoke("acadia:pedigree-state"),
+  saveResearchBrief: (value) => ipcRenderer.invoke("acadia:save-brief", value),
+  saveSourceAppraisal: (value) => ipcRenderer.invoke("acadia:save-appraisal", value),
+  saveOriginRelationship: (value) => ipcRenderer.invoke("acadia:save-origin", value),
+  saveFindingAssessment: (value) => ipcRenderer.invoke("acadia:save-finding", value),
+  saveAssumption: (value) => ipcRenderer.invoke("acadia:save-assumption", value),
+  saveMethod: (value) => ipcRenderer.invoke("acadia:save-method", value),
+  saveReviewIssue: (value) => ipcRenderer.invoke("acadia:save-review-issue", value),
+  pedigreeRevisions: (kind, id) => ipcRenderer.invoke("acadia:pedigree-revisions", kind, id),
+  createPedigreeSnapshot: () => ipcRenderer.invoke("acadia:create-pedigree-snapshot"),
+  getPedigreeSnapshot: (id) => ipcRenderer.invoke("acadia:get-pedigree-snapshot", id),
+  challengeAnalysis: (target) => ipcRenderer.invoke("acadia:challenge-analysis", target),
+  assistMethod: (id) => ipcRenderer.invoke("acadia:assist-method", id),
+  getDesktopState: () => ipcRenderer.invoke("acadia:desktop-state"),
+  saveDesktopPreferences: (patch) =>
+    ipcRenderer.invoke("acadia:save-desktop-preferences", patch),
+  listLocalModels: (endpoint) =>
+    ipcRenderer.invoke("acadia:list-local-models", endpoint),
+  testAIConnection: (settings) =>
+    ipcRenderer.invoke("acadia:test-ai-connection", settings),
+  onDesktopChanged: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: DesktopState) =>
+      callback(state);
+    ipcRenderer.on("acadia:desktop-changed", listener);
+    return () => ipcRenderer.removeListener("acadia:desktop-changed", listener);
+  },
+  onCommand: (callback) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      command: DesktopCommand,
+    ) => {
+      const active = document.activeElement as HTMLElement | null;
+      // Native text fields use Chromium's history. Rich editors receive the command
+      // in the renderer so their own document history (including citations) is used.
+      const nativeField = /^(INPUT|TEXTAREA|SELECT)$/.test(
+        active?.tagName || "",
+      );
+      if ((command === "undo" || command === "redo") && nativeField) {
+        void ipcRenderer
+          .invoke("acadia:native-edit", command)
+          .catch(() => undefined);
+        return;
+      }
+      callback(command);
+    };
+    ipcRenderer.on("acadia:command", listener);
+    return () => ipcRenderer.removeListener("acadia:command", listener);
+  },
   listProjects: () => ipcRenderer.invoke("acadia:list-projects"),
   switchProject: (id) => ipcRenderer.invoke("acadia:switch-project", id),
   researchState: () => ipcRenderer.invoke("acadia:research-state"),
@@ -76,10 +125,12 @@ const api: AcadiaAPI = {
   fullscreen: () => ipcRenderer.invoke("acadia:fullscreen"),
   saveSettings: (settings) =>
     ipcRenderer.invoke("acadia:save-settings", settings),
-  generate: (project, kind, instructions) =>
-    ipcRenderer.invoke("acadia:generate", project, kind, instructions),
+  generate: (project, kind, instructions, plan) =>
+    ipcRenderer.invoke("acadia:generate", project, kind, instructions, plan),
   exportOutput: (output, format) =>
     ipcRenderer.invoke("acadia:export-output", output, format),
+  exportProjectPlan: (output) => ipcRenderer.invoke("acadia:export-project-plan", output),
+  exportPowerBI: () => ipcRenderer.invoke("acadia:export-power-bi"),
   onBeforeClose: (callback) => {
     beforeClose = callback;
     return () => {

@@ -147,6 +147,9 @@ export function createOfflineOutput(
   );
   let body: string;
   switch (kind) {
+    case "project-plan":
+      body = `## Gap and proposed deliverable\n\n${question}\n\nSelect an existing analysis and describe the gap before approving a delivery plan. Compare software, curriculum, process changes, and further research as appropriate.\n\n## Planning worksheet\n\n| Phase | Deliverable | Depends on | Completion criteria |\n| --- | --- | --- | --- |\n| Validate need | Gap, users and alternatives | Reviewed analysis | Researcher accepts the intervention rationale |\n| Define and design | Requirements or learning objectives | Validated need | Measurable acceptance criteria are agreed |\n| Produce and pilot | Reviewable software, materials or other deliverable | Approved design | Proposed solution tested under stated conditions |\n| Validate and hand off | Test record and maintenance responsibilities | Pilot results | Acceptance criteria met or limitations explicitly accepted |\n\nOwners, dates, effort and budgets are unassessed. This offline outline does not establish feasibility or approve work.\n\n## Unresolved research\n\n${unknowns(input)}`;
+      break;
     case "hypothesis":
       body = `## Working propositions\n\n${sourceList(hypotheses, "No hypothesis card is present. Write a falsifiable proposition, its predicted observation, and the condition that would disprove it.")}\n\n## Test design to complete\n\n1. Define the proposed relationship and competing explanations.\n2. Specify an observable outcome, comparison, and decision threshold before collecting results.\n3. Connect supporting and contradicting sources to each proposition.\n4. Record a conclusion only after evaluating the evidence.\n\n## Unresolved questions\n\n${unknowns(input)}`;
       break;

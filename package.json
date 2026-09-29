@@ -1,6 +1,6 @@
 {
   "name": "acadia",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Collect evidence. Connect ideas. Release understanding.",
   "author": {
     "name": "byrneDev",
@@ -28,7 +28,7 @@
     "test:e2e": "playwright test",
     "package:mac": "npm run build && electron-builder --mac dir --arm64",
     "package:win": "node scripts/prepare-windows.cjs && npm run build && electron-builder --win nsis --x64",
-    "package:linux": "node scripts/prepare-linux.cjs && npm run build && electron-builder --linux deb AppImage --x64 --publish never",
+    "package:linux": "node scripts/prepare-linux.cjs && npm run build && electron-builder --linux deb AppImage --x64 --publish never --config.extraMetadata.desktopName=acadia.desktop",
     "format": "prettier --write src tests scripts *.ts package.json",
     "notices": "node scripts/third-party-notices.cjs"
   },
@@ -118,10 +118,11 @@
       "icon": "resources/branding/acadia-icon.png",
       "desktop": {
         "entry": {
-          "StartupWMClass": "Acadia",
+          "StartupWMClass": "acadia",
           "Keywords": "research;evidence;analysis;mindmap;"
         }
-      }
+      },
+      "syncDesktopName": true
     },
     "deb": {
       "depends": [
@@ -160,7 +161,7 @@
         "to": "Library-hours-sample.acadia"
       },
       {
-        "from": "docs/VALIDATION-v0.2.md",
+        "from": "docs/VALIDATION-v0.4.md",
         "to": "VALIDATION.md"
       },
       {
@@ -170,6 +171,26 @@
       {
         "from": "docs/VALIDATION-v0.3.md",
         "to": "VALIDATION-v0.3.md"
+      },
+      {
+        "from": "docs/VALIDATION-v0.4.md",
+        "to": "VALIDATION-v0.4.md"
+      },
+      {
+        "from": "docs/RESEARCH-METHODS.md",
+        "to": "RESEARCH-METHODS.md"
+      },
+      {
+        "from": "docs/POWER-BI.md",
+        "to": "POWER-BI.md"
+      },
+      {
+        "from": "docs/samples/Analytical-pedigree-sample.acadia",
+        "to": "Analytical-pedigree-sample.acadia"
+      },
+      {
+        "from": "docs/evaluations/v0.4-local-model.json",
+        "to": "evaluations/v0.4-local-model.json"
       }
     ],
     "asarUnpack": [

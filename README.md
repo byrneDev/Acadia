@@ -32,7 +32,7 @@ Get the package for your computer from [GitHub Releases](https://github.com/byrn
 | macOS, Apple Silicon | ZIP containing `Acadia.app`                | Extract the app and move it to Applications.           |
 | Windows, x64         | NSIS installer; ZIP handoff where provided | Extract the ZIP if applicable, then run the installer. |
 
-Current builds are unsigned; the macOS app is not notarized. Read the release notes before installing. Intel Mac, Linux ARM, and other Linux distributions are not release targets for 0.3.0. See [Support](SUPPORT.md) for platform and troubleshooting expectations.
+Current builds are unsigned; the macOS app is not notarized. Read the release notes before installing. Intel Mac, Linux ARM, and other Linux distributions are not release targets for 0.4.0. See [Support](SUPPORT.md) for platform and troubleshooting expectations.
 
 Start with the included [fictional library-hours investigation](docs/samples/Library-hours-sample.acadia), or create a project and enter the question you want to investigate. No API key is needed to collect, search, organize, edit, or export research.
 
@@ -40,7 +40,9 @@ Start with the included [fictional library-hours investigation](docs/samples/Lib
 
 ### Collector — follow the evidence
 
-- **Board:** arrange notes, questions, hypotheses, files, and links; draw labeled relationships; organize named areas and save useful views.
+- **Research brief:** define and revise the question, decision, scope, inclusion criteria and success criteria.
+- **Methods:** use five editable worksheets for competing hypotheses, SWOT, root causes, risk and technology readiness. Link evidence, assumptions and gap tasks; request AI review explicitly.
+- **Board:** arrange notes, questions, hypotheses, files, links, and method worksheets; draw labeled relationships; organize named areas and save useful views. **Add item** includes all five methods, with an **Open worksheet** action on their cards.
 - **Sources:** read searchable PDF, Word, text, and captured web passages with page or paragraph locations, acquisition dates, and source versions. Use local English OCR for scanned PDFs and images.
 - **Evidence:** compare supporting passages, contradictions, alternative explanations, and researcher assessments without treating a drawn connection as proof.
 - **Tasks:** connect follow-up work to a question or gap, with completion criteria, status, optional dates, and resulting sources.
@@ -59,7 +61,23 @@ Source versions and report snapshots preserve the evidence behind older findings
 
 SQLite full-text search covers the indexed collection. A model still receives a finite selection of passages, with coverage limits recorded in the result. A verified citation establishes saved source provenance; it does not establish that a conclusion is correct. Automatic quotation detection is not exhaustive, so quoted prose still needs human review.
 
+## Desktop workspace in v0.4.0
+
+The current source includes an OS-aware shell with system/light/dark themes, a compact navigation sidebar, contextual source reading, and a report-focused editor. Board and report positions survive view switches. Platform menus, keyboard commands, named connection presets, and deliberate model checks reduce setup friction. See the [desktop GUI notes](docs/GUI-REFRESH.md) for behavior and validation boundaries. The v0.4.0 packages include this interface; consult the validation record for the platforms actually tested.
+
+## Research methods, delivery plans and data exports
+
+V0.4 adds versioned source appraisals, shared-origin review, structured findings and assumptions. Inspect the reasoning behind a conclusion and the observation that could change it. Preview an editable pedigree appendix and acknowledge analytical limitations before release. See [Research methods](docs/RESEARCH-METHODS.md).
+
+After analysis, **Plan a deliverable** turns a supported gap into a reviewable software, curriculum or other project plan. Edit work packages and export a PMIS handoff for Monday, Jira or Microsoft Planner. Use **Export data for Power BI** for linked research and delivery tables with a [data dictionary and relationship guide](docs/POWER-BI.md). Exports are local files; they do not publish data or connect to your tenant automatically.
+
+Portable projects now use **format v3** (Acadia 0.4+), retaining earlier source and report history. V1/V2 imports remain supported; new assessments start unassessed. See [v0.4 validation](docs/VALIDATION-v0.4.md) for checks and limitations.
+
 ## A look inside
+
+![Five research methods and a cited competing-hypotheses worksheet](docs/screenshots/v0.4/methods.png)
+
+_Methods: examine competing explanations using the included fictional investigation. Source locations, support review and confidence remain distinct._
 
 ![Collector canvas with connected research cards](docs/screenshots/collector.png)
 
@@ -98,6 +116,8 @@ npm run dev
 
 Use the committed lockfile with `npm ci`. On Linux, follow the [native dependency and display requirements](docs/LINUX.md). Run Electron desktop checks in a graphical session; browser-only tests do not verify the native application.
 
+In WebStorm, select the shared **Acadia** run configuration and click **Run**. It uses Node 24 from `.nvmrc` when installed through a supported version manager, otherwise Node from your PATH; use npm as the project's package manager. This starts the desktop app with live reload and keeps test projects and settings in `tmp/acadia-dev`, separate from the installed app's research. The Run panel's **Stop** button ends the development session.
+
 ```sh
 npm run typecheck
 npm test
@@ -111,7 +131,7 @@ Packaging commands and release verification are in [Releasing](docs/RELEASING.md
 
 ## Quality and current boundaries
 
-Automated checks cover document extraction beyond the old page/card cutoffs, contradictory evidence, duplicate handling, source version round trips, privacy enforcement, approved search plans, citation validation, report revisions, real document exports, and separate-window release behavior. Native checks use disposable profiles. See the [0.3 validation record](docs/VALIDATION-v0.3.md) for release-preparation results, [0.2 validation](docs/VALIDATION-v0.2.md) for earlier package checks, and [local-model validation](docs/LOCAL-AI.md) for the live model example. Consult each release for the results of its exact build.
+Automated checks cover document extraction beyond the old page/card cutoffs, contradictory evidence, duplicate handling, source version round trips, privacy enforcement, approved search plans, citation validation, report revisions, real document exports, and separate-window release behavior. Native checks use disposable profiles. See the [0.4 validation record](docs/VALIDATION-v0.4.md) for current release checks and the mixed live-model evaluation, and [0.3 validation](docs/VALIDATION-v0.3.md) for earlier results. Consult each release for the results of its exact build.
 
 Printed English OCR needs review against the original. Login-dependent pages, arbitrary media codecs, very large investigations, and every possible document layout are not guaranteed. Files are bounded to 250 MB each and portable archives to approximately 1 GB. Physical touchscreens, mixed-DPI monitors, and presentation hardware need testing on your setup.
 

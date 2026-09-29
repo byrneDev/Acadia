@@ -88,7 +88,78 @@ export async function readBoundedJSON(response: Response): Promise<unknown> {
   }
 }
 
+async function providerHTTPError(
+  response: Response,
+  endpoint: URL,
+): Promise<Error> {
+  if (response.status !== 429 || endpoint.hostname !== "api.openai.com") {
+    await response.body?.cancel();
+    return new Error(
+      `AI provider returned HTTP ${response.status}. Check its endpoint, model, credentials, and provider limits.`,
+    );
+  }
+
+  let code: unknown;
+  let type: unknown;
+  try {
+    const payload = (await readBoundedJSON(response)) as {
+      error?: { code?: unknown; type?: unknown };
+    } | null;
+    code = payload?.error?.code;
+    type = payload?.error?.type;
+  } catch {
+    // Keep the HTTP diagnosis even when the bounded error body is unreadable.
+  }
+
+  // Provider messages may echo credentials or research. Only recognized codes
+  // select our own text; no provider-supplied strings reach the UI or job log.
+  let guidance: string;
+  switch (code) {
+    case "credit_balance_exhausted":
+      guidance =
+        "OpenAI API credits are exhausted. Add credits in OpenAI Platform billing before retrying.";
+      break;
+    case "organization_spend_limit_exceeded":
+      guidance =
+        "OpenAI API organization spend limit reached. Review the organization's spending limit in OpenAI Platform or wait for it to reset.";
+      break;
+    case "project_spend_limit_exceeded":
+      guidance =
+        "OpenAI API project spend limit reached. Review this API project's spending limit in OpenAI Platform or wait for it to reset.";
+      break;
+    case "organization_usage_limit_exceeded":
+      guidance =
+        "OpenAI API organization usage limit reached. Check the account's approved usage limit in OpenAI Platform; a higher limit may require OpenAI support.";
+      break;
+    default:
+      if (code === "insufficient_quota" || type === "insufficient_quota") {
+        guidance =
+          "OpenAI API quota is unavailable. Check the API account's credits and usage limits in OpenAI Platform before retrying.";
+      } else if (
+        code === "rate_limit_exceeded" ||
+        code === "slow_down" ||
+        type === "rate_limit_error"
+      ) {
+        const retryAfter = response.headers.get("retry-after") ?? "";
+        const seconds = /^\d+(?:\.\d+)?$/.test(retryAfter)
+          ? Math.ceil(Number(retryAfter))
+          : 0;
+        const wait =
+          Number.isSafeInteger(seconds) && seconds > 0
+            ? `Wait at least ${seconds} seconds before retrying.`
+            : "Wait before retrying and check the API account's rate limits.";
+        guidance = `OpenAI API rate limit reached. ${wait} Reduce request frequency or size if it continues.`;
+      } else {
+        guidance =
+          "OpenAI rejected the request. This can indicate a rate limit or an API credits/usage limit; check OpenAI Platform billing and limits before retrying.";
+      }
+  }
+  return new Error(`${guidance} (HTTP 429)`);
+}
+
 const OUTPUT_INSTRUCTIONS: Record<OutputKind, string> = {
+  "project-plan":
+    "Develop a conditional gap-to-deliverable project plan with phases, deliverables, dependencies, acceptance criteria, validation and limitations. Do not imply the proposed solution is proven by its planning outline.",
   hypothesis:
     "Produce working hypotheses with supporting and contradicting evidence, alternative explanations, falsification criteria, and next tests. Label hypotheses as untested unless actual results exist.",
   "research-plan":
@@ -112,6 +183,9 @@ export async function requestResearchModel(
     maxTokens?: number;
     timeoutMs?: number;
     jsonSchema?: Readonly<Record<string, unknown>>;
+    onRequest?: (
+      request: import("../shared/pedigree-analysis").ModelRequestAudit,
+    ) => void;
   } = {},
 ): Promise<string> {
   const endpoint = resolveAIEndpoint(settings);
@@ -185,6 +259,29 @@ export async function requestResearchModel(
         : endpoint.hostname === "api.openai.com"
           ? { max_completion_tokens: maxTokens, store: false }
           : { max_tokens: maxTokens };
+    const parameters = {
+      stream: false,
+      ...(settings.provider === "ollama"
+        ? { format: jsonSchema ?? "json" }
+        : {}),
+      ...limits,
+    };
+    // Record the logical request, never headers or credentials. Provider defaults
+    // remain omitted rather than being presented as explicitly chosen values.
+    const audit = JSON.stringify({
+      provider: settings.provider,
+      endpoint: endpoint.href,
+      model: settings.model.trim(),
+      messages,
+      parameters: { ...parameters, timeoutMs },
+    });
+    options.onRequest?.(
+      JSON.parse(
+        settings.apiKey
+          ? audit.split(settings.apiKey).join("[redacted credential]")
+          : audit,
+      ),
+    );
     const response = await fetch(endpoint, {
       method: "POST",
       redirect: "error",
@@ -198,18 +295,11 @@ export async function requestResearchModel(
       body: JSON.stringify({
         model: settings.model.trim(),
         messages,
-        stream: false,
-        ...(settings.provider === "ollama"
-          ? { format: jsonSchema ?? "json" }
-          : {}),
-        ...limits,
+        ...parameters,
       }),
     });
     if (!response.ok) {
-      await response.body?.cancel();
-      throw new Error(
-        `AI provider returned HTTP ${response.status}. Check its endpoint, model, and credentials.`,
-      );
+      throw await providerHTTPError(response, endpoint);
     }
     const payload = (await readBoundedJSON(response)) as {
       message?: { content?: unknown };
@@ -373,10 +463,7 @@ export async function analyzeProject(
       }),
     });
     if (!response.ok) {
-      await response.body?.cancel();
-      throw new Error(
-        `AI provider returned HTTP ${response.status}. Check the endpoint, model, API key, and provider availability.`,
-      );
+      throw await providerHTTPError(response, endpoint);
     }
     payload = await readBoundedJSON(response);
   } catch (error) {

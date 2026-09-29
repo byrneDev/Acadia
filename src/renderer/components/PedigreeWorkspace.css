@@ -1,0 +1,408 @@
+.pedigree-workspace {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 26px 34px;
+}
+.pedigree-workspace > .research-heading {
+  max-width: 1000px;
+}
+.pedigree-form {
+  display: grid;
+  gap: 16px;
+  max-width: 1040px;
+}
+.pedigree-form .field {
+  margin: 0;
+}
+.pedigree-field > small {
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 12px;
+  font-weight: normal;
+}
+.pedigree-field input,
+.pedigree-field textarea,
+.pedigree-field select {
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  background: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font: inherit;
+  line-height: 1.5;
+}
+.pedigree-field textarea {
+  resize: vertical;
+}
+.pedigree-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.pedigree-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 6px;
+}
+.pedigree-actions > span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.pedigree-section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  margin: 18px 0;
+  background: var(--panel);
+}
+.pedigree-section > summary {
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.6;
+}
+.pedigree-section[open] > summary {
+  margin-bottom: 18px;
+}
+.pedigree-section > p,
+.pedigree-history p {
+  color: var(--muted);
+  line-height: 1.7;
+  margin: 8px 0 16px;
+}
+.pedigree-history {
+  padding: 12px 0;
+}
+.pedigree-history > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.pedigree-history article {
+  border-left: 2px solid var(--line-strong);
+  padding: 10px 14px;
+  margin-top: 12px;
+}
+.pedigree-history dl {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) 3fr;
+  gap: 7px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.pedigree-history dt {
+  color: var(--muted);
+}
+.pedigree-history dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pedigree-history-field {
+  display: contents;
+}
+.method-row > summary {
+  cursor: pointer;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.method-row[open] > summary {
+  margin-bottom: 16px;
+}
+.method-cause-tree ol {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+.method-cause-tree li {
+  padding: 5px 0;
+}
+.method-cause-tree button {
+  text-align: left;
+}
+.pedigree-passages {
+  border: 1px solid var(--line);
+  padding: 14px;
+  border-radius: 7px;
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+.pedigree-passages legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.pedigree-passage-options {
+  max-height: 270px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.pedigree-passage-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.pedigree-passage-options label > input {
+  margin-top: 3px;
+  accent-color: var(--phosphor);
+  flex: 0 0 auto;
+}
+.pedigree-passage-options label > span {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.6;
+  min-width: 0;
+}
+.pedigree-passage-options label > span > span {
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pedigree-selected-passages {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.pedigree-selected-passages li {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 7px 0;
+}
+.pedigree-selected-passages button {
+  font-size: 12px;
+  text-align: left;
+  line-height: 1.6;
+  color: var(--phosphor);
+}
+.pedigree-selected-passages button:last-child {
+  color: var(--muted);
+}
+.pedigree-inline-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 12px 0;
+}
+.pedigree-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  margin: 12px 0 20px;
+}
+.pedigree-counts span {
+  background: var(--ink-2);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+.pedigree-record-list {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+}
+.pedigree-record {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 16px;
+}
+.pedigree-record header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.pedigree-record p {
+  color: var(--muted);
+  line-height: 1.65;
+  margin: 9px 0;
+  white-space: pre-wrap;
+}
+.pedigree-record small {
+  color: var(--muted);
+}
+.pedigree-record button.text-button {
+  text-align: left;
+}
+.pedigree-link-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+}
+.pedigree-link-options legend {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pedigree-link-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.pedigree-link-options input {
+  accent-color: var(--phosphor);
+}
+.method-registry {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.method-registry button {
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+.method-registry button:hover {
+  border-color: var(--line-strong);
+}
+.method-registry strong {
+  display: block;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+.method-registry span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.method-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 22px;
+}
+.method-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.method-list > button {
+  text-align: left;
+  border: 1px solid var(--line);
+  padding: 14px;
+  border-radius: 7px;
+}
+.method-list > button[aria-current="true"] {
+  background: var(--panel);
+  border-color: var(--phosphor);
+}
+.method-list small {
+  display: block;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.method-list strong {
+  overflow-wrap: anywhere;
+}
+.method-row {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 18px;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+}
+.method-row > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.method-row > header button {
+  color: var(--muted);
+  font-size: 12px;
+}
+.method-reference {
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  line-height: 1.7;
+  font-size: 12px;
+}
+.method-reference a {
+  color: var(--phosphor);
+}
+.method-matrix {
+  overflow: auto;
+}
+.method-matrix table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 600px;
+}
+.method-matrix th,
+.method-matrix td {
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  padding: 12px;
+  line-height: 1.6;
+}
+.method-matrix th {
+  background: var(--panel);
+}
+.method-matrix td {
+  font-size: 12px;
+}
+.text-button.method-passage-link {
+  font: 500 13px / 1.5 var(--font-ui, system-ui, sans-serif);
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-height: 36px;
+  padding: 4px 0;
+}
+.method-matrix tbody th:first-child {
+  min-width: 200px;
+}
+.source-reader .pedigree-grid {
+  grid-template-columns: 1fr;
+}
+.source-reader .pedigree-section {
+  padding: 14px;
+}
+@media (max-width: 1000px) {
+  .method-layout {
+    grid-template-columns: 1fr;
+  }
+  .method-list {
+    flex-direction: row;
+    overflow: auto;
+  }
+  .method-list > button {
+    min-width: 180px;
+  }
+}
+@media (max-width: 760px) {
+  .pedigree-workspace {
+    padding: 20px;
+  }
+  .pedigree-grid {
+    grid-template-columns: 1fr;
+  }
+}

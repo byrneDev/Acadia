@@ -6,10 +6,10 @@ Download packages and checksums from [Acadia releases](https://github.com/byrneD
 
 ## Install the Debian package
 
-For version 0.3.0, run these commands in the download directory:
+For version 0.4.0, run these commands in the download directory:
 
 ```sh
-sudo apt install ./Acadia-0.3.0-linux-x64.deb
+sudo apt install ./Acadia-0.4.0-linux-x64.deb
 acadia
 ```
 
@@ -23,13 +23,13 @@ Ubuntu 24.04 names the FUSE 2 compatibility library `libfuse2t64`; install it al
 
 ```sh
 sudo apt install libfuse2t64
-chmod +x Acadia-0.3.0-linux-x64.AppImage
-./Acadia-0.3.0-linux-x64.AppImage
+chmod +x Acadia-0.4.0-linux-x64.AppImage
+./Acadia-0.4.0-linux-x64.AppImage
 ```
 
 An AppImage does not install dependency packages or a system AppArmor profile. Ubuntu can restrict user namespaces for an unrecognized portable executable. If startup reports a namespace or sandbox error, install the `.deb` instead, or ask your administrator to supply a narrowly scoped AppArmor profile for the exact application path. Do not disable AppArmor globally, run Acadia as root, or add `--no-sandbox`. Acadia's AppImage launcher explicitly retains Electron's sandbox. [Ubuntu's AppArmor documentation](https://documentation.ubuntu.com/security/security-features/privilege-restriction/apparmor/) explains the per-application permission model.
 
-For an environment without FUSE, `./Acadia-0.3.0-linux-x64.AppImage --appimage-extract` creates `squashfs-root`; the executable is `squashfs-root/acadia`. Extraction alone does not resolve namespace restrictions or missing desktop libraries.
+For an environment without FUSE, `./Acadia-0.4.0-linux-x64.AppImage --appimage-extract` creates `squashfs-root`; the executable is `squashfs-root/acadia`. Extraction alone does not resolve namespace restrictions or missing desktop libraries.
 
 ## Local data, AI, and desktop integration
 
@@ -49,7 +49,7 @@ npm test
 npm run package:linux
 ```
 
-The Linux preparation script checks the matching GNU/Linux x64 canvas package and ELF architecture. On Linux x64 it also loads the native canvas before packaging. Outputs are `release/v0.3.0/Acadia-0.3.0-linux-x64.deb`, `release/v0.3.0/Acadia-0.3.0-linux-x64.AppImage`, and `release/v0.3.0/linux-unpacked/acadia`. Packaging does not publish a release.
+The Linux preparation script checks the matching GNU/Linux x64 canvas package and ELF architecture. On Linux x64 it also loads the native canvas before packaging. Outputs are `release/v0.4.0/Acadia-0.4.0-linux-x64.deb`, `release/v0.4.0/Acadia-0.4.0-linux-x64.AppImage`, and `release/v0.4.0/linux-unpacked/acadia`. The packaging command also sets Linux-only `desktopName` metadata and synchronizes the desktop filename and window class as `acadia`. Packaging does not publish a release.
 
 Native Ubuntu CI is the primary build route. A Linux container can produce artifacts on macOS, but does not establish that a real Ubuntu desktop, graphics driver, keyring, or dual-display setup works. Do not reuse macOS `node_modules` inside a Linux container. See [Electron Builder's cross-platform guidance](https://www.electron.build/docs/features/multi-platform-build/).
 

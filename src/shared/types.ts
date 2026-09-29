@@ -7,6 +7,14 @@ import type {
   ReportDocument,
   ReportRevision,
 } from "./research";
+import type {
+  AIConnectionResult,
+  DesktopCommand,
+  DesktopPreferences,
+  DesktopState,
+  LocalModel,
+} from "./desktop";
+import type { DeliveryPlan } from "./pmis";
 export type CardKind =
   | "note"
   | "question"
@@ -25,7 +33,20 @@ export type OutputKind =
   | "whitepaper"
   | "gap-analysis"
   | "needs-analysis"
-  | "decision-brief";
+  | "decision-brief"
+  | "project-plan";
+export interface ProjectPlanContext {
+  analysisOutputId: string;
+  analysisRevisionId?: string;
+  gapClaimId?: string;
+  gap: string;
+  deliverableType: "software" | "curriculum" | "other";
+  deliverable: string;
+  acceptanceCriteria: string;
+  analysisTitle?: string;
+  analysisMarkdown?: string;
+  analysisCitations?: Citation[];
+}
 export interface ResearchCard {
   id: string;
   kind: CardKind;
@@ -41,6 +62,7 @@ export interface ResearchCard {
   mimeType?: string;
   extraction?: string;
   sourceId?: string;
+  methodId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -64,9 +86,12 @@ export interface ResearchOutput {
   document?: ReportDocument;
   revisions?: ReportRevision[];
   releasedRevisionId?: string;
+  pedigreeSnapshotId?: string;
+  plan?: ProjectPlanContext;
+  deliveryPlan?: DeliveryPlan;
 }
 export interface Project {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   id: string;
   title: string;
   question: string;
@@ -105,6 +130,14 @@ export interface WorkspaceState {
   projectPath?: string;
 }
 export interface AcadiaAPI extends ResearchAPI {
+  getDesktopState?(): Promise<DesktopState>;
+  saveDesktopPreferences?(
+    patch: Partial<DesktopPreferences>,
+  ): Promise<DesktopState>;
+  onDesktopChanged?(callback: (state: DesktopState) => void): () => void;
+  onCommand?(callback: (command: DesktopCommand) => void): () => void;
+  listLocalModels?(endpoint: string): Promise<LocalModel[]>;
+  testAIConnection?(settings: AISettings): Promise<AIConnectionResult>;
   load(): Promise<WorkspaceState>;
   save(project: Project): Promise<{ savedAt: string }>;
   newProject(): Promise<WorkspaceState>;
@@ -124,11 +157,14 @@ export interface AcadiaAPI extends ResearchAPI {
     project: Project,
     kind: OutputKind,
     instructions: string,
+    plan?: ProjectPlanContext,
   ): Promise<ResearchOutput>;
   exportOutput(
     output: ResearchOutput,
     format: "md" | "pdf" | "docx",
   ): Promise<string | null>;
+  exportProjectPlan(output: ResearchOutput): Promise<string | null>;
+  exportPowerBI(): Promise<string | null>;
   onProjectChanged(callback: (project: Project) => void): () => void;
   onBeforeClose(callback: () => Promise<void>): () => void;
 }
