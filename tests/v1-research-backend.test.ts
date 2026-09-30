@@ -175,20 +175,22 @@ describe("v1 production research boundaries", () => {
   it("retrieves unpinned counterevidence despite more than sixty higher-priority pins", async () => {
     const { store, project, service, add } = fixture();
     project.privacy = { mode: "local", provider: "offline" };
-    for (let i = 0; i < 135; i++)
-      add(
-        `pin-${i}`,
-        [
-          `Cedar field performance benefits improves successful observation ${i}.`,
-        ],
-        true,
-      );
-    add("negative", [
-      "Independent Cedar controlled field test found no improvement. Negative result contradicts claimed performance benefit.",
-    ]);
-    add("unknown", [
-      "Cedar field performance causal mechanism remains unknown. Missing observation: randomized matched seasonal control.",
-    ]);
+    store.transaction(() => {
+      for (let i = 0; i < 135; i++)
+        add(
+          `pin-${i}`,
+          [
+            `Cedar field performance benefits improves successful observation ${i}.`,
+          ],
+          true,
+        );
+      add("negative", [
+        "Independent Cedar controlled field test found no improvement. Negative result contradicts claimed performance benefit.",
+      ]);
+      add("unknown", [
+        "Cedar field performance causal mechanism remains unknown. Missing observation: randomized matched seasonal control.",
+      ]);
+    });
     // Legacy pin-prioritized search demonstrates why balancing only after search is insufficient.
     expect(
       store

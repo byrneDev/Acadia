@@ -655,19 +655,23 @@ export class Ingestion {
         this.store.updateVersionStatus(version.id, {
           totalUnits: paragraphs.length,
         });
-        for (let i = 0; i < paragraphs.length; i++) {
+        for (let start = 0; start < paragraphs.length; start += 25) {
           if (running.controller.signal.aborted) throw new Error("Cancelled");
-          append(paragraphs[i], i + 1, "native", `Paragraph ${i + 1}`);
-          if (i % 25 === 0 || i === paragraphs.length - 1) {
+          const end = Math.min(start + 25, paragraphs.length);
+          // Commit each recoverable unit once. Text, its index and coverage must
+          // agree even if a write fails; yield between units for cancellation.
+          this.store.transaction(() => {
+            for (let i = start; i < end; i++)
+              append(paragraphs[i], i + 1, "native", `Paragraph ${i + 1}`);
             this.store.updateVersionStatus(version.id, {
-              processedUnits: i + 1,
+              processedUnits: end,
             });
-            this.update(job, {
-              progress: (i + 1) / paragraphs.length,
-              message: `Reading paragraph ${i + 1} of ${paragraphs.length}`,
-            });
-            await tick();
-          }
+          });
+          this.update(job, {
+            progress: end / paragraphs.length,
+            message: `Reading paragraph ${end} of ${paragraphs.length}`,
+          });
+          await tick();
         }
         const hasText = paragraphs.some((p) => p.trim());
         this.store.updateVersionStatus(version.id, {

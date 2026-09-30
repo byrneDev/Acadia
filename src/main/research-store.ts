@@ -1911,9 +1911,11 @@ export class ResearchStore {
     });
   }
   addPassage(passage: Passage) {
-    if (this.getVersion(passage.versionId).status !== "processing")
-      throw new Error("Completed source passages are immutable.");
-    this.insertPassage(passage);
+    this.transaction(() => {
+      if (this.getVersion(passage.versionId).status !== "processing")
+        throw new Error("Completed source passages are immutable.");
+      this.insertPassage(passage);
+    });
   }
   private insertPassage(passage: Passage) {
     checkId(passage.id);

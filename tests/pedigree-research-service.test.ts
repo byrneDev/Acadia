@@ -273,15 +273,16 @@ describe("on-demand critical research with fixed contradictory fixtures", () => 
                 "claimIds",
                 "assumptionIds",
               ]);
-              expect(issue.properties.passageIds.items.enum).toContain(
-                passage.passageId,
-              );
-              expect(issue.properties.claimIds.items.enum).toContain(claim.id);
+              expect(issue.properties.passageIds.items).toEqual({
+                type: "string",
+                maxLength: 200,
+              });
+              expect(issue.properties.claimIds.items.enum).toBeUndefined();
               expect(issue.properties.assumptionIds.maxItems).toBe(0);
               expect(
                 request.format.properties.suggestedChanges.items.properties
                   .citationIds.items.enum,
-              ).toContain(passage.citationId);
+              ).toBeUndefined();
               expect(request.format.additionalProperties).toBe(false);
             } else {
               expect(request.format).toBeUndefined();

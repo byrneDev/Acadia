@@ -111,11 +111,100 @@ it("runs the versioned analytical-quality retrieval and provenance regressions w
   }
 });
 
+it("fits the complete Cedar challenge in the local context budget without duplicating reference inventories in its schema", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "acadia-quality-v1-budget-"));
+  const store = new ResearchStore(directory),
+    project = createBlankProject();
+  project.privacy = {
+    mode: "local",
+    provider: "ollama",
+    endpoint: "http://127.0.0.1:11434",
+    model: "fixture-model",
+  };
+  seedQualityFixtureV1(store, project);
+  const service = new ResearchService(
+    store,
+    capture,
+    () => ({ provider: "offline", endpoint: "", model: "" }),
+    () => undefined,
+    () => {},
+  );
+  let requests = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)),
+        input = JSON.parse(body.messages[1].content);
+      let response: unknown = {
+        support: ["Cedar"],
+        counter: ["Cedar counterevidence"],
+        gaps: ["Cedar missing observation"],
+      };
+      if (input.source_passages) {
+        requests++;
+        expect(input.source_passages).toHaveLength(120);
+        expect(body.options.num_ctx).toBeLessThanOrEqual(65536);
+        expect(JSON.stringify(body.format).length).toBeLessThan(2500);
+        expect(
+          body.format.properties.issues.items.properties.category.enum,
+        ).toContain("causal-inference");
+        const passage = input.source_passages.find(
+          (p: { passageId: string }) => p.passageId === "primary-p1",
+        );
+        expect(passage.citationId).toBeTruthy();
+        response = {
+          summary: "Causal attribution requires a controlled comparison",
+          issues: [
+            {
+              category: "causal-inference",
+              summary: "No causal isolation",
+              detail: "The pilot confounds load and staffing changes.",
+              passageIds: [passage.passageId],
+              claimIds: ["unsupported-causal-claim"],
+              assumptionIds: [],
+            },
+          ],
+          limitations: ["Synthetic fixture"],
+          suggestedChanges: [],
+        };
+      }
+      return new Response(
+        JSON.stringify({ message: { content: JSON.stringify(response) } }),
+      );
+    }),
+  );
+  try {
+    const job = service.challenge(project, {
+      kind: "finding",
+      id: "unsupported-causal-claim",
+    });
+    await vi.waitFor(() =>
+      expect(["completed", "failed"]).toContain(store.getJob(job.id)?.status),
+    );
+    const result = store.getJob(job.id)!;
+    expect(result.status, result.message).toBe("completed");
+    expect(requests).toBe(1);
+    expect(store.pedigreeState(project.id).findings[0].supportReview).toBe(
+      "unassessed",
+    );
+  } finally {
+    await service.shutdown();
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+    vi.unstubAllGlobals();
+  }
+});
+
 /** Never downloads a model or sends user data. Run only on explicit opt-in;
  * output indicators remain separate from the human semantic-quality rubric. */
 it.skipIf(process.env.ACADIA_QUALITY_EVALUATION !== "1")(
   "records v1 local-model results against the versioned analytical-quality rubric",
   async () => {
+    const challengeOnly = process.env.ACADIA_QUALITY_OPERATIONS === "challenge";
+    if (process.env.ACADIA_QUALITY_OPERATIONS && !challengeOnly)
+      throw new Error(
+        "Only the challenge-only evaluation selector is supported; omit it for the complete fixture.",
+      );
     const endpoint =
       process.env.ACADIA_QUALITY_ENDPOINT || "http://127.0.0.1:11434";
     const url = new URL(endpoint);
@@ -150,6 +239,9 @@ it.skipIf(process.env.ACADIA_QUALITY_EVALUATION !== "1")(
       model,
       scope:
         "Synthetic fixture only. No private profile, document, web search, model installation or cloud fallback.",
+      operations: challengeOnly
+        ? ["challenge"]
+        : ["report", "challenge", "abstention"],
       machine: {
         platform: platform(),
         arch: arch(),
@@ -227,44 +319,60 @@ it.skipIf(process.env.ACADIA_QUALITY_EVALUATION !== "1")(
         service!.cancelJob(job.id);
         throw new Error("Evaluation exceeded the six-minute per-job limit.");
       };
-      const report = await service
-        .analyze(
-          project,
-          "decision-brief",
-          "Evaluate causal attribution, shared origins, alternative explanations, contradictions and the decisive missing test. Keep limitations explicit.",
-        )
-        .then(
-          (result) => ({ status: "completed", result }),
-          (error) => ({
-            status: "failed",
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
+      const report = challengeOnly
+        ? {
+            status: "not-run",
+            reason: "Explicit challenge-only contract check",
+          }
+        : await service
+            .analyze(
+              project,
+              "decision-brief",
+              "Evaluate causal attribution, shared origins, alternative explanations, contradictions and the decisive missing test. Keep limitations explicit.",
+            )
+            .then(
+              (result) => ({ status: "completed", result }),
+              (error) => ({
+                status: "failed",
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
       const challenge = await settled(
         service.challenge(project, {
           kind: "finding",
           id: "unsupported-causal-claim",
         }),
       );
-      const abstention = await settled(
-        service.ask(project, QUALITY_FIXTURE_V1.abstentionQuestion),
-      );
-      document.outputs = { report, challenge, abstention };
+      const abstention = challengeOnly
+        ? undefined
+        : await settled(
+            service.ask(project, QUALITY_FIXTURE_V1.abstentionQuestion),
+          );
+      document.outputs = {
+        report,
+        challenge,
+        abstention: abstention ?? {
+          status: "not-run",
+          reason: "Explicit challenge-only contract check",
+        },
+      };
       const runs = store.state(project.id).runs,
-        run = runs.find((r) => r.kind === "decision-brief");
+        run = runs.find(
+          (r) => r.kind === (challengeOnly ? "challenge" : "decision-brief"),
+        );
       const proposal =
         challenge.status === "completed"
           ? (challenge.result as ChallengeProposal)
           : undefined;
       const answer =
-        abstention.status === "completed"
+        abstention?.status === "completed"
           ? (abstention.result as ResearchAnswer)
           : undefined;
       document.metrics = {
         transportAndContract: {
           report: report.status,
           challenge: challenge.status,
-          abstention: abstention.status,
+          abstention: abstention?.status ?? "not-run",
         },
         retrieval: retrievalMetrics(run),
         supportReview: {

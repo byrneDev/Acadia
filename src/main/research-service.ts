@@ -166,10 +166,9 @@ function challengeResponseSchema(
     type: "array",
     maxItems: values.length ? 200 : 0,
     uniqueItems: true,
-    items: {
-      type: "string",
-      ...(values.length ? { enum: [...new Set(values)] } : {}),
-    },
+    // Exact allowed identifiers are already present in the input and checked
+    // after generation. Repeating large ID inventories here wastes context.
+    items: { type: "string", maxLength: 200 },
   });
   return {
     type: "object",

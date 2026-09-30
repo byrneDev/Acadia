@@ -259,6 +259,10 @@
       {
         "from": "docs/evaluations/v1-mac-upgrade.json",
         "to": "evaluations/v1-mac-upgrade.json"
+      },
+      {
+        "from": "docs/evaluations/v1-local-model-interface.json",
+        "to": "evaluations/v1-local-model-interface.json"
       }
     ],
     "asarUnpack": [

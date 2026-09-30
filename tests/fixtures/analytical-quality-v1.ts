@@ -98,102 +98,111 @@ export function seedQualityFixtureV1(
   project: Project,
   pinCount = 135,
 ): void {
-  const stamp = "2026-09-30T12:00:00.000Z";
-  project.title = "SYNTHETIC Cedar analytical-quality evaluation";
-  project.question = QUALITY_FIXTURE_V1.question;
-  store.saveProject(project);
-  const add = (id: string, text: string, pin = false, failed = false) => {
-    store.saveSource({
-      id,
-      projectId: project.id,
-      title: id,
-      kind: "document",
-      currentVersionId: `${id}-v1`,
-      inclusion: pin ? "pin" : "include",
-      createdAt: stamp,
-      updatedAt: stamp,
-    });
-    store.addVersion(
-      {
-        id: `${id}-v1`,
-        sourceId: id,
+  // Seed one synthetic investigation as an atomic import, avoiding hundreds of
+  // unrelated disk commits before the retrieval exercise begins.
+  store.transaction(() => {
+    const stamp = "2026-09-30T12:00:00.000Z";
+    project.title = "SYNTHETIC Cedar analytical-quality evaluation";
+    project.question = QUALITY_FIXTURE_V1.question;
+    store.saveProject(project);
+    const add = (id: string, text: string, pin = false, failed = false) => {
+      store.saveSource({
+        id,
+        projectId: project.id,
         title: id,
-        hash: contentHash(text),
-        acquiredAt: stamp,
-        status: failed ? "failed" : "ready",
-        method: "native",
-        totalUnits: 1,
-        processedUnits: failed ? 0 : 1,
-      },
-      [
+        kind: "document",
+        currentVersionId: `${id}-v1`,
+        inclusion: pin ? "pin" : "include",
+        createdAt: stamp,
+        updatedAt: stamp,
+      });
+      store.addVersion(
         {
-          id: `${id}-p1`,
+          id: `${id}-v1`,
           sourceId: id,
-          versionId: `${id}-v1`,
-          text,
-          locator: "Page 1",
-          page: 1,
+          title: id,
+          hash: contentHash(text),
+          acquiredAt: stamp,
+          status: failed ? "failed" : "ready",
           method: "native",
-          inclusion: "include",
+          totalUnits: 1,
+          processedUnits: failed ? 0 : 1,
+        },
+        [
+          {
+            id: `${id}-p1`,
+            sourceId: id,
+            versionId: `${id}-v1`,
+            text,
+            locator: "Page 1",
+            page: 1,
+            method: "native",
+            inclusion: "include",
+          },
+        ],
+      );
+    };
+    for (const source of QUALITY_FIXTURE_V1.sources)
+      add(
+        source.id,
+        source.text,
+        false,
+        source.role === "incomplete-extraction",
+      );
+    for (let i = 0; i < pinCount; i++)
+      add(
+        `pinned-context-${i}`,
+        `SYNTHETIC CEDAR PIN ${i}: Administrative equipment inventory provides context but no comparative downtime observation.`,
+        true,
+      );
+    for (const id of ["syndicated-a", "syndicated-b"])
+      store.saveOrigin({
+        ...createOrigin(project.id, id, "primary"),
+        kind: "same-study",
+        status: "confirmed",
+        rationale:
+          "The article explicitly derives all measurements from the primary pilot.",
+      });
+    store.saveAppraisal({
+      ...createAppraisal(project.id, "primary", "primary-v1"),
+      evidenceType: "uncontrolled before/after pilot",
+      origin: "primary",
+      methods:
+        "Six convenience-selected machines over four days, without a control.",
+      applicability: "Insufficient for full-factory causal attribution.",
+      limitations: "Load and staffing changed simultaneously.",
+      rationale: "The observed association does not isolate a filter effect.",
+      passageIds: ["primary-p1"],
+      reviewStatus: "reviewed",
+    });
+    store.saveClaim({
+      id: "unsupported-causal-claim",
+      projectId: project.id,
+      title:
+        "Cedar caused a 60 percent downtime reduction and justifies full rollout.",
+      question: project.question,
+      status: "provisional",
+      alternatives: "Load or staffing changes",
+      limitations: "No causal isolation or long-term safety outcomes",
+      updatedAt: stamp,
+      links: [
+        {
+          id: "irrelevant-but-valid",
+          passageId: "calendar-p1",
+          quote: QUALITY_FIXTURE_V1.sources.find((s) => s.id === "calendar")!
+            .text,
+          relation: "supports",
+          rationale:
+            "Deliberately wrong support assertion for this fixture; provenance is valid.",
         },
       ],
-    );
-  };
-  for (const source of QUALITY_FIXTURE_V1.sources)
-    add(source.id, source.text, false, source.role === "incomplete-extraction");
-  for (let i = 0; i < pinCount; i++)
-    add(
-      `pinned-context-${i}`,
-      `SYNTHETIC CEDAR PIN ${i}: Administrative equipment inventory provides context but no comparative downtime observation.`,
-      true,
-    );
-  for (const id of ["syndicated-a", "syndicated-b"])
-    store.saveOrigin({
-      ...createOrigin(project.id, id, "primary"),
-      kind: "same-study",
-      status: "confirmed",
-      rationale:
-        "The article explicitly derives all measurements from the primary pilot.",
     });
-  store.saveAppraisal({
-    ...createAppraisal(project.id, "primary", "primary-v1"),
-    evidenceType: "uncontrolled before/after pilot",
-    origin: "primary",
-    methods:
-      "Six convenience-selected machines over four days, without a control.",
-    applicability: "Insufficient for full-factory causal attribution.",
-    limitations: "Load and staffing changed simultaneously.",
-    rationale: "The observed association does not isolate a filter effect.",
-    passageIds: ["primary-p1"],
-    reviewStatus: "reviewed",
-  });
-  store.saveClaim({
-    id: "unsupported-causal-claim",
-    projectId: project.id,
-    title:
-      "Cedar caused a 60 percent downtime reduction and justifies full rollout.",
-    question: project.question,
-    status: "provisional",
-    alternatives: "Load or staffing changes",
-    limitations: "No causal isolation or long-term safety outcomes",
-    updatedAt: stamp,
-    links: [
-      {
-        id: "irrelevant-but-valid",
-        passageId: "calendar-p1",
-        quote: QUALITY_FIXTURE_V1.sources.find((s) => s.id === "calendar")!
-          .text,
-        relation: "supports",
-        rationale:
-          "Deliberately wrong support assertion for this fixture; provenance is valid.",
-      },
-    ],
-  });
-  store.saveFinding({
-    ...createFinding(project.id, "unsupported-causal-claim"),
-    classification: "inference",
-    reasoning: "Fixture claims causation from a before/after association.",
-    confidence: "unassessed",
-    supportReview: "unassessed",
+    store.saveFinding({
+      ...createFinding(project.id, "unsupported-causal-claim"),
+      classification: "inference",
+      reasoning: "Fixture claims causation from a before/after association.",
+      confidence: "unassessed",
+      supportReview: "unassessed",
+    });
   });
 }
