@@ -6,14 +6,39 @@ V0.5 adds per-item AI summaries, explicitly accepted Reviewer Notes, the researc
 
 ## Recorded checks
 
-| Check                                       | Observed result                                                                                                                                                                                                                        |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Final v0.5.0 typecheck and production build | **Passed** on Apple Silicon macOS.                                                                                                                                                                                                     |
-| Final v0.5.0 unit/research suite            | **318 passed, 1 skipped across 29 files** (28 passed, 1 skipped). The live-model evaluation is opt-in.                                                                                                                                 |
-| Final v0.5.0 native Electron suite          | **35 passed on Apple Silicon macOS** in 1.3 minutes, using the production build and isolated fictional investigations. This is source-build validation, not validation of the final packaged installers.                               |
-| Release package and native platform checks  | Consult the [v0.5.0 release workflow](https://github.com/byrneDev/Acadia/actions/workflows/release.yml) for the exact tag and its platform results. Package creation, integrity verification and native execution are separate checks. |
+| Check                                       | Observed result                                                                                                                                                                                                                  |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Final v0.5.0 typecheck and production build | **Passed** on Apple Silicon macOS.                                                                                                                                                                                               |
+| Final v0.5.0 unit/research suite            | **318 passed, 1 skipped across 29 files** (28 passed, 1 skipped). The live-model evaluation is opt-in.                                                                                                                           |
+| Final v0.5.0 native Electron suite          | **35 passed on Apple Silicon macOS** in 1.3 minutes, using the production build and isolated fictional investigations. This is source-build validation, not validation of the final packaged installers.                         |
+| GitHub source and native package checks     | **Passed on macOS ARM64, Windows x64 and Ubuntu x64** at the release commit. Exact runs, counts and tested executables are recorded below. Package creation, integrity verification and native execution remain separate checks. |
+| Public release and download integrity       | **Passed**: public v0.5.0 release, all four packages and `SHA256SUMS.txt` downloaded anonymously; file sizes and SHA-256 values matched GitHub metadata, and all package hashes matched the published manifest.                  |
 
-This bundled record describes the local v0.5.0 source-validation checkpoint before publication. No local v0.5 installers were built for this checkpoint. Packaging and native package checks use the release workflow, configured to build and test macOS Apple Silicon, Windows x64 and Ubuntu 24.04 x64 packages on their respective runners, verify all four download assets and their checksums, and publish only after those jobs succeed. A pending, failed or absent run does not establish a pass. This document does not infer CI results from an earlier version or from local package creation.
+The copy of this record committed at tag `v0.5.0` and bundled by its release workflow describes the local source-validation checkpoint before publication. No local v0.5 installers were built for that checkpoint. This version on `main` adds subsequent GitHub verification results; it does not alter the tagged source or packaged application. No result is inferred from an earlier version or from package creation alone.
+
+## GitHub source and native package verification
+
+Both runs used release commit **`92b959e2fd77ef7746f13d4da1035c02f8111f0e`**, tagged **`v0.5.0`**. Results were checked in the individual job logs on September 29, 2026 local time (September 30 UTC).
+
+The [source CI run](https://github.com/byrneDev/Acadia/actions/runs/36657889438) passed typechecking, production builds, **318 unit/research tests with 1 skipped across 29 files**, and **35 Electron scenarios on each platform**. These scenarios exercised the source-built application on macOS ARM64, Windows x64 and Ubuntu x64; they did not use final installers.
+
+The [native release package run](https://github.com/byrneDev/Acadia/actions/runs/36658465522) separately rebuilt and tested the release on each operating system. Every package job passed typechecking and **318 unit/research tests with 1 skipped across 29 files** before packaging. Its native Electron results were:
+
+| Platform / runner            | Native application exercised                                                                                                                                         | Packaged Electron result      |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| macOS ARM64 / `macos-15`     | Packaged `Acadia.app/Contents/MacOS/Acadia`, then archived with executable permissions in the release ZIP.                                                           | **35 passed in 2.7 minutes**. |
+| Windows x64 / `windows-2025` | Packaged `win-unpacked/Acadia.exe`; the same job also built the NSIS installer.                                                                                      | **35 passed in 2.1 minutes**. |
+| Ubuntu x64 / `ubuntu-24.04`  | `.deb` installed through apt; desktop entry and applicable AppArmor profile checked, then `/opt/Acadia/acadia` tested under D-Bus/Xvfb. The AppImage was also built. | **35 passed in 1.2 minutes**. |
+
+These are native automated runner checks, using isolated profiles and fictional investigations. They do not establish interactive Windows installer/upgrade behavior, normal Ubuntu AppImage launch, or physical display and input compatibility. The complete release workflow, including package jobs, combined asset verification and publication, passed.
+
+## Publication and public-download verification
+
+GitHub published [Acadia v0.5.0](https://github.com/byrneDev/Acadia/releases/tag/v0.5.0) at **2026-09-30 02:14:54 UTC**. Its latest-release API returned `v0.5.0` with `draft: false` and `prerelease: false`; the anonymous release page returned HTTP 200.
+
+All four public packages and `SHA256SUMS.txt` were then downloaded anonymously over HTTPS with `curl`. Every downloaded file's byte count and SHA-256 matched its GitHub API metadata. The SHA-256 of every package also matched the downloaded published manifest. The [machine-readable delivery record](release-validation/v0.5.0.json) preserves the exact filenames, sizes, hashes, public URLs, release commit and workflow links.
+
+These download checks establish public availability and transfer integrity for those bytes. They do not add interactive installation or hardware coverage beyond the native checks above, and checksums are not a substitute for publisher signing.
 
 ## Evidence and board acceptance
 
@@ -53,7 +78,7 @@ Each attempt used one explicit loopback request and a disposable store. No real 
 
 ## Platform and delivery limits
 
-The intended downloads are a macOS Apple Silicon ZIP containing `Acadia.app`, a Windows x64 NSIS installer, and Ubuntu x64 `.deb` and `.AppImage` packages. Locally generated Windows/Linux packages are cross-builds until their native jobs or equivalent native checks pass. The exact release assets and checksum file identify the delivered bytes.
+The native release jobs built a macOS Apple Silicon ZIP containing `Acadia.app`, a Windows x64 NSIS installer, and Ubuntu x64 `.deb` and `.AppImage` packages. The table above identifies which packaged executable was tested on each runner; building an installer or AppImage alone does not establish its interactive installation or launch behavior. The exact release assets and checksum file identify the delivered bytes.
 
 - Interactive Windows install/upgrade, normal Ubuntu desktop/AppImage launch, Linux keyring behavior and distribution-specific sandbox behavior require their own checks beyond automated runner scenarios.
 - Power BI Desktop import and live Monday/Jira/Planner tenant imports are not validated by local export tests. Acadia does not execute a tenant importer or publish data automatically.

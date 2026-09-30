@@ -27,9 +27,13 @@ Read the [quick start](https://github.com/byrneDev/Acadia/blob/v0.5.0/docs/QUICK
 
 ## Validation and known limits
 
-The v0.5.0 source passed typecheck, production build, **318 unit/research tests** and **35 native Electron scenarios** on Apple Silicon macOS, using fictional investigations and isolated profiles. The [v0.5 validation record](https://github.com/byrneDev/Acadia/blob/v0.5.0/docs/VALIDATION-v0.5.md) records that local source-validation checkpoint separately from native package checks and historical live-model observations.
+Release commit **`92b959e2fd77ef7746f13d4da1035c02f8111f0e`** (`v0.5.0`) passed [source CI on macOS ARM64, Windows x64 and Ubuntu x64](https://github.com/byrneDev/Acadia/actions/runs/36657889438): typecheck, production build, **318 unit/research tests passed with 1 skipped**, and **35 Electron scenarios passed on each platform**.
 
-The [release workflow](https://github.com/byrneDev/Acadia/actions/workflows/release.yml) builds and tests the packaged application on macOS, Windows and Ubuntu runners, verifies the full distribution and checksums, and gates automated publication on all required jobs succeeding. Consult the run for **tag v0.5.0** for exact outcomes. Earlier CI runs or local cross-built installers do not validate this release's native behavior.
+The [native release package run](https://github.com/byrneDev/Acadia/actions/runs/36658465522) separately passed the same **318 unit/research tests with 1 skipped** and **35 packaged Electron scenarios on each platform**. Tests used the packaged macOS app, Windows unpacked application, and Ubuntu application installed from the `.deb`. All three package jobs and the combined asset-verification job passed. These automated checks use fictional investigations and isolated profiles; they do not establish interactive Windows installation/upgrade or normal Ubuntu AppImage launch.
+
+The complete release workflow passed and GitHub published v0.5.0 at **2026-09-30 02:14:54 UTC** as its latest release, with neither draft nor prerelease status. The public release page returned HTTP 200. All four packages and `SHA256SUMS.txt` were downloaded anonymously; every file's size and SHA-256 matched GitHub metadata, and all package hashes matched the published manifest. The [delivery verification record](https://github.com/byrneDev/Acadia/blob/main/docs/release-validation/v0.5.0.json) records the exact assets and hashes.
+
+The [tagged and bundled validation record](https://github.com/byrneDev/Acadia/blob/v0.5.0/docs/VALIDATION-v0.5.md) preserves the earlier local source-validation checkpoint. The [current validation record](https://github.com/byrneDev/Acadia/blob/main/docs/VALIDATION-v0.5.md) adds the exact native workflow and public-download outcomes and distinguishes them from historical live-model observations.
 
 Physical multi-monitor, touchscreen, mixed-DPI and assistive-technology checks remain separate. Power BI Desktop and live PMIS tenant imports have not been established by the local file-export tests. The earlier local-model evaluations retain both accepted and rejected responses; no general research-accuracy pass is claimed.
 

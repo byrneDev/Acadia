@@ -1,0 +1,55 @@
+{
+  "release": "https://github.com/byrneDev/Acadia/releases/tag/v0.5.0",
+  "releaseCommit": "92b959e2fd77ef7746f13d4da1035c02f8111f0e",
+  "publishedAt": "2026-09-30T02:14:54Z",
+  "downloadMethod": "Anonymous HTTPS download with curl",
+  "releaseWorkflow": "https://github.com/byrneDev/Acadia/actions/runs/36658465522",
+  "assets": [
+    {
+      "name": "Acadia-0.5.0-linux-x64.AppImage",
+      "bytes": 209374669,
+      "sha256": "857e1416ca2d20e7bcbefc7d721e24c5cb2c4abf10fc87f40dff437ceaf5db93",
+      "downloadUrl": "https://github.com/byrneDev/Acadia/releases/download/v0.5.0/Acadia-0.5.0-linux-x64.AppImage"
+    },
+    {
+      "name": "Acadia-0.5.0-linux-x64.deb",
+      "bytes": 162429556,
+      "sha256": "c39020bd245f2a2d5bdd26f87ac5d06ccbaa75defeb2a4af5b131d9d69deac7b",
+      "downloadUrl": "https://github.com/byrneDev/Acadia/releases/download/v0.5.0/Acadia-0.5.0-linux-x64.deb"
+    },
+    {
+      "name": "Acadia-0.5.0-macOS-arm64.zip",
+      "bytes": 198341390,
+      "sha256": "aa81537ffdf33b8d5129951e99ef3ccef7933d1e213e353bea087d40ded4dd44",
+      "downloadUrl": "https://github.com/byrneDev/Acadia/releases/download/v0.5.0/Acadia-0.5.0-macOS-arm64.zip"
+    },
+    {
+      "name": "Acadia-0.5.0-Windows-x64.exe",
+      "bytes": 165802563,
+      "sha256": "1a18ad7c336cccd733e52537038f166532a933be650dc6c147a2beeb6ad5814b",
+      "downloadUrl": "https://github.com/byrneDev/Acadia/releases/download/v0.5.0/Acadia-0.5.0-Windows-x64.exe"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 381,
+      "sha256": "c4aa1f8026154b71fbb9ae4adb1b55bfca609812ff88bea5a9918ae8182fc272",
+      "downloadUrl": "https://github.com/byrneDev/Acadia/releases/download/v0.5.0/SHA256SUMS.txt"
+    }
+  ],
+  "sourceCI": "https://github.com/byrneDev/Acadia/actions/runs/36657889438",
+  "releaseWorkflowConclusion": "success",
+  "publicationChecks": {
+    "latestTag": "v0.5.0",
+    "draft": false,
+    "prerelease": false,
+    "anonymousReleasePageHTTPStatus": 200
+  },
+  "downloadVerification": {
+    "publicAssetFilesDownloaded": 5,
+    "packagesDownloaded": 4,
+    "allFileSizesMatchGitHubAPI": true,
+    "allFileSHA256ValuesMatchGitHubAPIDigests": true,
+    "allPackageSHA256ValuesMatchPublishedManifest": true
+  },
+  "scope": "Public availability and transfer integrity. Native execution coverage and interactive installation limitations are recorded in ../VALIDATION-v0.5.md."
+}
