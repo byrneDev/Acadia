@@ -224,6 +224,6 @@
   },
   "optionalDependencies": {
     "@napi-rs/canvas-linux-x64-gnu": "0.1.80",
-    "@napi-rs/canvas-win32-x64-msvc": "0.1.80"
+    "@napi-rs/canvas-win32-x64-msvc": "1.0.9"
   }
 }
