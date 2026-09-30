@@ -1,4 +1,5 @@
 import type { Citation, Passage } from "./research";
+import MarkdownIt from "markdown-it";
 import {
   validatePedigreeEntity,
   type MethodWorksheet,
@@ -8,6 +9,10 @@ import {
 
 export const RETRIEVAL_POOLS = ["pins", "support", "counter", "gaps"] as const;
 export type RetrievalPool = (typeof RETRIEVAL_POOLS)[number];
+export type SnapshotAnalysisContext = Pick<
+  PedigreeSnapshot,
+  "id" | "state" | "claims" | "tasks"
+>;
 export interface RetrievalSelection {
   passageId: string;
   pool: RetrievalPool;
@@ -30,6 +35,7 @@ export interface RetrievalOmission {
 }
 export interface RetrievalManifest {
   policy: "balanced-four-pools-v1";
+  candidatePolicy?: "pin-independent-v1";
   limits: { characters: number; passages: number };
   perPool: { characters: number; passages: number };
   selections: RetrievalSelection[];
@@ -131,7 +137,7 @@ function references(value: unknown, allowed: Set<string>): string[] {
 export function validateIssueProposals(
   value: unknown,
   citations: Citation[],
-  snapshot: PedigreeSnapshot,
+  snapshot: SnapshotAnalysisContext,
 ): AnalysisIssueProposal[] {
   const passageIds = new Set(citations.map((c) => c.passageId));
   const claimIds = new Set(snapshot.claims.map((c) => c.id));
@@ -167,7 +173,7 @@ export function validateChallengeProposal(
     original: string;
     runId: string;
     citations: Citation[];
-    snapshot: PedigreeSnapshot;
+    snapshot: SnapshotAnalysisContext;
   },
 ): ChallengeProposal {
   const v = record(input);
@@ -239,7 +245,11 @@ export function validateChallengeProposal(
 export function validateMethodProposal(
   input: unknown,
   current: MethodWorksheet,
-  context: { runId: string; citations: Citation[]; snapshot: PedigreeSnapshot },
+  context: {
+    runId: string;
+    citations: Citation[];
+    snapshot: SnapshotAnalysisContext;
+  },
 ): MethodAssistanceProposal {
   const v = record(input),
     proposed = record(v.proposedMethod);
@@ -418,6 +428,7 @@ export function balancedPassages(
 }
 
 /** Locating literal text is a provenance check, never an entailment judgment. */
+const quotationMarkdown = new MarkdownIt({ html: false });
 export function associateQuotedText(
   markdown: string,
   cited: Citation[],
@@ -425,7 +436,41 @@ export function associateQuotedText(
   const known = new Map(cited.map((c) => [c.label.replace(/^S/, ""), c]));
   const associations: QuoteAssociation[] = [];
   const warnings: string[] = [];
+  // Source quotations are prose, not string literals in code examples. Keep
+  // original offsets so proposed-edit anchors continue to identify exact text.
+  const lineOffsets = [0];
+  for (const match of markdown.matchAll(/\n/g))
+    lineOffsets.push(match.index! + 1);
+  const codeRanges = quotationMarkdown
+    .parse(markdown, {})
+    .flatMap((token) =>
+      ["fence", "code_block"].includes(token.type) && token.map
+        ? [
+            {
+              start: lineOffsets[token.map[0]],
+              end: lineOffsets[token.map[1]] ?? markdown.length,
+            },
+          ]
+        : [],
+    );
+  let inlineScan = markdown;
+  for (const range of codeRanges)
+    inlineScan =
+      inlineScan.slice(0, range.start) +
+      inlineScan.slice(range.start, range.end).replace(/[^\n]/g, " ") +
+      inlineScan.slice(range.end);
+  for (const match of inlineScan.matchAll(/(`+)[\s\S]*?\1(?!`)/g))
+    codeRanges.push({
+      start: match.index!,
+      end: match.index! + match[0].length,
+    });
   for (const match of markdown.matchAll(/“([^”\n]+)”|"([^"\n]+)"/g)) {
+    if (
+      codeRanges.some(
+        (range) => match.index! >= range.start && match.index! < range.end,
+      )
+    )
+      continue;
     const quote = match[1] ?? match[2];
     const start = match.index!;
     const end = start + match[0].length;

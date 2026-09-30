@@ -431,6 +431,7 @@ function GapEditor({
       <FormActions
         busy={busy}
         dirty={draft.dirty}
+        draft={draft}
         disabled={!valid}
         label="Save research gap"
         notice={notice}
@@ -567,6 +568,7 @@ function DecisionEditor({
       <FormActions
         busy={busy}
         dirty={draft.dirty}
+        draft={draft}
         disabled={!valid}
         label="Save decision"
         notice={notice}

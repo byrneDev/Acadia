@@ -265,9 +265,8 @@ function IssueForm({
         setBusy(true);
         setNotice("");
         try {
-          const saved = await window.acadia!.saveReviewIssue(value);
-          draft.saved(
-            saved,
+          await draft.persist(
+            (value) => window.acadia!.saveReviewIssue(value),
             initial ? undefined : createReviewIssue(project.id, empty.target),
           );
           setNotice("Review issue saved.");
@@ -313,6 +312,7 @@ function IssueForm({
       <FormActions
         busy={busy}
         dirty={draft.dirty}
+        draft={draft}
         notice={notice}
         label="Save review issue"
       >
@@ -325,7 +325,7 @@ function IssueForm({
             setNotice("");
             try {
               const saved = await window.acadia!.saveReviewIssue(value);
-              draft.saved(saved);
+              await draft.saved(saved);
               const sourceIds = [
                 ...new Set(
                   (
@@ -359,7 +359,7 @@ function IssueForm({
               const linked = { ...saved, taskIds: [...saved.taskIds, taskId] };
               draft.edit(linked);
               const result = await window.acadia!.saveReviewIssue(linked);
-              draft.saved(result);
+              await draft.saved(result);
               setNotice("Research task created and linked to this issue.");
             } catch (error) {
               onError(error);

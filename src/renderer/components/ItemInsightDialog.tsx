@@ -16,6 +16,8 @@ import { usePedigree } from "./pedigree-state";
 import "./ItemInsightDialog.css";
 import { ItemInsightMarkdown } from "./ItemInsightMarkdown";
 import { ReviewerNotes } from "./ReviewerNotes";
+import { useDurableDraft } from "./durableDrafts";
+import { DraftStatus } from "./DraftStatus";
 
 const sameTarget = (a: ItemInsightTarget | undefined, b: ItemInsightTarget) =>
   a?.kind === b.kind && a.id === b.id && a.versionId === b.versionId;
@@ -169,10 +171,6 @@ export function itemInsightIsStale(
   );
 }
 
-// Unaccepted editing state survives closing the dialog to inspect a citation.
-// It is never added to the evidence library until the explicit acceptance action.
-const reviewDrafts = new Map<string, string>();
-
 function ItemReviewForm({
   projectId,
   insight,
@@ -188,10 +186,15 @@ function ItemReviewForm({
   onCitation: (citation: Citation) => void;
   onEvidence?: (id: string) => void;
 }) {
-  const key = `${projectId}:${insight.runId}`;
-  const [notes, setNotes] = useState(
-    () => reviewDrafts.get(key) ?? insight.markdown,
-  );
+  const draft = useDurableDraft({
+    projectId,
+    key: `item-review:${insight.runId}`,
+    kind: "item-review",
+    targetId: insight.runId,
+    initial: insight.markdown,
+    baseSignature: insight.runId,
+  });
+  const notes = draft.value;
   const [reviewed, setReviewed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -221,12 +224,14 @@ function ItemReviewForm({
         setError("");
         try {
           await beforeRun();
-          const claim = await window.acadia!.acceptItemInsight({
-            runId: insight.runId,
-            notes,
+          await draft.persist(async (notes) => {
+            const claim = await window.acadia!.acceptItemInsight({
+              runId: insight.runId,
+              notes,
+            });
+            setSavedClaim(claim);
+            return notes;
           });
-          setSavedClaim(claim);
-          reviewDrafts.delete(key);
         } catch (error) {
           setError(
             error instanceof Error
@@ -239,6 +244,7 @@ function ItemReviewForm({
       }}
     >
       <h3>Review and accept</h3>
+      <DraftStatus draft={draft} />
       <p>
         Edit the proposed text for your investigation. Acceptance saves a dated
         Reviewer Notes entry and a linked evidence record. Your original item
@@ -251,10 +257,9 @@ function ItemReviewForm({
           maxLength={30000}
           required
           value={notes}
-          disabled={saving}
+          disabled={saving || draft.loading}
           onChange={(event) => {
-            setNotes(event.target.value);
-            reviewDrafts.set(key, event.target.value);
+            draft.edit(event.target.value);
             setReviewed(false);
           }}
         />
@@ -285,7 +290,14 @@ function ItemReviewForm({
       )}
       <button
         className="button primary"
-        disabled={saving || !reviewed || !notes.trim() || !available}
+        disabled={
+          saving ||
+          draft.loading ||
+          draft.conflict ||
+          !reviewed ||
+          !notes.trim() ||
+          !available
+        }
       >
         {saving ? "Saving reviewed notes…" : "Accept into Reviewer Notes"}
       </button>

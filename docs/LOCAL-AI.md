@@ -31,6 +31,14 @@ Web capture contacts the websites you select. Brave discovery is a separate opti
 
 These controls use Ollama's [chat API](https://docs.ollama.com/api/chat), [structured outputs](https://docs.ollama.com/capabilities/structured-outputs), and [context options](https://docs.ollama.com/faq#how-can-i-specify-the-context-window-size).
 
-## Validation status
+## Current 1.0 release-candidate qualification
+
+Local AI remains available, but connection success and a short structured-generation check do not establish research-quality reliability. In the [September 30, 2026 Cedar evaluation](evaluations/v1-local-model.json), Ollama `qwen3.5:9b` (`Q4_K_M`) on an M2 Mac with 24 GB RAM retrieved the required supporting passage, counterevidence, alternative explanation and missing observation. The failed extraction was excluded and shared source origins were recorded.
+
+**All three generated outputs were rejected:** the decision brief used an internal record UUID as a citation, the challenge returned invalid evidence references, and the answer contained quotation text absent from the supplied passages. No report, proposal or answer was applied. The evaluation runner recorded these failures successfully; that is not a successful model qualification. The raw responses and pending human-review rubric are retained in the linked artifact.
+
+This configuration has not passed Acadia's current structured research workflow fixture. Human semantic review remains pending, and no model research-quality certification is claimed. Review the saved sources and limitations for every accepted draft; if a response fails validation, keep your existing writing and retry explicitly or choose another configured model. Acadia does not silently substitute a model or fall back to cloud processing. See the [1.0 candidate validation record](VALIDATION-v1.0.md) for separate application, model, platform and hardware evidence.
+
+## Historical 0.2.2 validation
 
 Version 0.2.2 passed 117 automated unit/integration tests, TypeScript checks, and four packaged Mac desktop scenarios, including the report-error regression check. Live Releaser generation also passed with `qwen3.5:9b`: a decision brief contained eight numbered passage citations and a bibliography from six sources, while earlier reports remained intact. Clicking citation [2] opened its correct saved note passage. The final model request took about 80 seconds. This verifies the generation and citation-navigation workflow, not the validity of every research conclusion. Native Windows and physical two-display/touchscreen checks remain unverified for this hotfix.

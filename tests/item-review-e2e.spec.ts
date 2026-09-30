@@ -174,7 +174,7 @@ test("human acceptance saves edited Reviewer Notes as provisional evidence witho
     expect(before.claims).toHaveLength(0);
     const insight = before.runs.find((entry) => entry.itemInsight)?.itemInsight;
     expect(insight).toBeTruthy();
-    const accept = summary(page).getByRole("button", {
+    let accept = summary(page).getByRole("button", {
       name: "Accept into Reviewer Notes",
       exact: true,
     });
@@ -205,6 +205,16 @@ test("human acceptance saves edited Reviewer Notes as provisional evidence witho
     await draftReader
       .getByRole("button", { name: "Close source reader", exact: true })
       .click();
+    // Unaccepted notes survive a full application restart; review confirmation does not.
+    await app.close();
+    session = await launch(directory);
+    app = session.app;
+    page = session.page;
+    accept = summary(page).getByRole("button", {
+      name: "Accept into Reviewer Notes",
+      exact: true,
+    });
+    await page.locator('.react-flow__node[data-id="review-item"] h3').click();
     await page
       .getByRole("button", {
         name: "AI summary & research advice",

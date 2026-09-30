@@ -3,6 +3,17 @@ import type { AcadiaAPI, Project } from "../shared/types";
 import type { DesktopCommand, DesktopState } from "../shared/desktop";
 
 let beforeClose: (() => Promise<void>) | undefined;
+ipcRenderer.on("acadia:flush-for-maintenance", async (_event, key: string) => {
+  let failed = false;
+  try {
+    await beforeClose?.();
+  } catch {
+    failed = true;
+  }
+  void ipcRenderer
+    .invoke("acadia:maintenance-ready", key, failed)
+    .catch(() => undefined);
+});
 ipcRenderer.on("acadia:before-close", async () => {
   let failure: string | undefined;
   try {
@@ -18,6 +29,47 @@ ipcRenderer.on("acadia:before-close", async () => {
 });
 
 const api: AcadiaAPI = {
+  researchDrafts: (projectId) =>
+    ipcRenderer.invoke("acadia:research-drafts", projectId),
+  saveResearchDraft: (input) =>
+    ipcRenderer.invoke("acadia:save-research-draft", input),
+  deleteResearchDraft: (projectId, key, revision) =>
+    ipcRenderer.invoke(
+      "acadia:delete-research-draft",
+      projectId,
+      key,
+      revision,
+    ),
+  listSourcesPage: (query, page) =>
+    ipcRenderer.invoke("acadia:list-sources-page", query, page),
+  searchSourcesPage: (query, page) =>
+    ipcRenderer.invoke("acadia:search-sources-page", query, page),
+  getSourcePassagesPage: (sourceId, versionId, query, page) =>
+    ipcRenderer.invoke(
+      "acadia:source-passages-page",
+      sourceId,
+      versionId,
+      query,
+      page,
+    ),
+  listAnalysisRunsPage: (page) =>
+    ipcRenderer.invoke("acadia:list-analysis-runs-page", page),
+  getAnalysisRun: (id) => ipcRenderer.invoke("acadia:get-analysis-run", id),
+  listBackups: () => ipcRenderer.invoke("acadia:list-backups"),
+  createBackup: () => ipcRenderer.invoke("acadia:create-backup"),
+  restoreBackup: () => ipcRenderer.invoke("acadia:restore-backup"),
+  credentialStatus: () => ipcRenderer.invoke("acadia:credential-status"),
+  removeCredential: (kind) =>
+    ipcRenderer.invoke("acadia:remove-credential", kind),
+  testAIGeneration: (settings) =>
+    ipcRenderer.invoke("acadia:test-ai-generation", settings),
+  checkForUpdates: () => ipcRenderer.invoke("acadia:check-for-updates"),
+  diagnosticReport: () => ipcRenderer.invoke("acadia:diagnostic-report"),
+  exportDiagnostics: () => ipcRenderer.invoke("acadia:export-diagnostics"),
+  createPassageCitation: (id) =>
+    ipcRenderer.invoke("acadia:create-passage-citation", id),
+  getSourcePagePreview: (sourceId, versionId, page) =>
+    ipcRenderer.invoke("acadia:source-page-preview", sourceId, versionId, page),
   addBoardReference: (reference) =>
     ipcRenderer.invoke("acadia:add-board-reference", reference),
   saveGap: (value) => ipcRenderer.invoke("acadia:save-gap", value),

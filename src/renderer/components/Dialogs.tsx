@@ -675,6 +675,14 @@ export function SettingsDialog({
   const [models, setModels] = useState<string[]>([]);
   const [diagnostic, setDiagnostic] = useState("");
   const [checking, setChecking] = useState(false);
+  const [credential, setCredential] =
+    useState<import("../../shared/maintenance").CredentialStatus>();
+  useEffect(() => {
+    void window.acadia
+      ?.credentialStatus?.()
+      .then(setCredential)
+      .catch(() => undefined);
+  }, []);
   const requestId = useRef(0);
   useEffect(() => {
     requestId.current++;
@@ -918,6 +926,89 @@ export function SettingsDialog({
               >
                 {checking ? "Checking…" : "Test connection"}
               </button>
+              <button
+                type="button"
+                className="button quiet"
+                disabled={checking || !s.endpoint || !s.model}
+                onClick={async () => {
+                  const request = ++requestId.current;
+                  setChecking(true);
+                  setError("");
+                  setDiagnostic("");
+                  try {
+                    const result = await window.acadia!.testAIGeneration(s);
+                    if (requestId.current === request)
+                      setDiagnostic(result.message);
+                  } catch (e) {
+                    if (requestId.current === request)
+                      setError(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    if (requestId.current === request) setChecking(false);
+                  }
+                }}
+              >
+                Test synthetic generation
+              </button>
+              <p className="muted">
+                The generation test sends only a fictional arithmetic prompt to
+                the selected service. Cloud providers may charge for it.
+                Untested models have no demonstrated research-quality rating.
+              </p>
+              {credential && (
+                <p role="status">
+                  Saved analysis key:{" "}
+                  {credential.analysis === "secure"
+                    ? "stored securely"
+                    : credential.analysis === "session"
+                      ? "session only"
+                      : "absent"}
+                  .{" "}
+                  {credential.secureStorageAvailable
+                    ? "Operating-system secure storage is available."
+                    : "Secure storage is unavailable; keys cannot persist securely."}
+                </p>
+              )}
+              {credential?.analysis !== "absent" && credential && (
+                <button
+                  type="button"
+                  className="button quiet"
+                  disabled={checking}
+                  onClick={async () => {
+                    try {
+                      setCredential(
+                        await window.acadia!.removeCredential("analysis"),
+                      );
+                      set({ ...s, apiKey: "" });
+                      setDiagnostic(
+                        "Saved analysis key removed from this installation.",
+                      );
+                    } catch (e) {
+                      setError(String(e));
+                    }
+                  }}
+                >
+                  Remove saved analysis key
+                </button>
+              )}
+              {credential?.search !== "absent" && credential && (
+                <button
+                  type="button"
+                  className="button quiet"
+                  disabled={checking}
+                  onClick={async () => {
+                    try {
+                      setCredential(
+                        await window.acadia!.removeCredential("search"),
+                      );
+                      setDiagnostic("Saved search key removed.");
+                    } catch (e) {
+                      setError(String(e));
+                    }
+                  }}
+                >
+                  Remove saved search key
+                </button>
+              )}
               {diagnostic && <p role="status">{diagnostic}</p>}
             </div>
             <p className="settings-note">

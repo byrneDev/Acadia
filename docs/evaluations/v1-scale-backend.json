@@ -1,0 +1,156 @@
+{
+  "benchmarkVersion": 1,
+  "startedAt": "2026-09-30T14:02:21.993Z",
+  "dataset": "Synthetic Cedar passages only; no user profile, files or network",
+  "requestedEnvelope": {
+    "sources": 1000,
+    "passages": 100000,
+    "cards": 500,
+    "analysisRuns": 250
+  },
+  "machine": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "cpu": "Apple M2",
+    "cpuCount": 8,
+    "totalMemoryBytes": 25769803776,
+    "node": "24.21.0",
+    "sqlite": "3.53.4"
+  },
+  "referenceHardwareValidation": "NOT CLAIMED: these results describe only the recorded host",
+  "uiResponsivenessValidation": "Not measured by this backend benchmark; native UI responsiveness remains a separate acceptance check.",
+  "metrics": {
+    "seed": {
+      "milliseconds": 3017.870333,
+      "memory": {
+        "rss": 300204032,
+        "heapTotal": 204472320,
+        "heapUsed": 76696088,
+        "external": 2761604,
+        "arrayBuffers": 236870
+      }
+    },
+    "coldStoreOpen": {
+      "milliseconds": 3.450749999999971,
+      "memory": {
+        "rss": 296435712,
+        "heapTotal": 204472320,
+        "heapUsed": 79390904,
+        "external": 2761644,
+        "arrayBuffers": 236870
+      }
+    },
+    "projectLibrary": {
+      "milliseconds": 0.8012920000001031,
+      "memory": {
+        "rss": 296730624,
+        "heapTotal": 204472320,
+        "heapUsed": 79707752,
+        "external": 2761644,
+        "arrayBuffers": 236870
+      }
+    },
+    "routineResearchState": {
+      "milliseconds": 11.383332999999766,
+      "memory": {
+        "rss": 298860544,
+        "heapTotal": 204472320,
+        "heapUsed": 82034456,
+        "external": 2761644,
+        "arrayBuffers": 236870
+      }
+    },
+    "routinePayloadBytes": 558961,
+    "exactSearchMilliseconds": [
+      0.27654100000017934,
+      0.10929100000021208,
+      0.10716699999966295,
+      0.0959170000000995,
+      0.09245800000007875,
+      0.08916700000008859,
+      0.0935829999998532,
+      0.08391600000004473,
+      0.1060419999998885,
+      0.08908300000030067
+    ],
+    "commonSearchFinalPage": {
+      "milliseconds": 525.2563329999998,
+      "memory": {
+        "rss": 277004288,
+        "heapTotal": 205045760,
+        "heapUsed": 82946824,
+        "external": 2761644,
+        "arrayBuffers": 236870
+      }
+    },
+    "sourcePassagesLastPage": {
+      "milliseconds": 0.6201670000000377,
+      "memory": {
+        "rss": 277020672,
+        "heapTotal": 205045760,
+        "heapUsed": 82957112,
+        "external": 2761644,
+        "arrayBuffers": 236870
+      }
+    },
+    "historyFinalPage": {
+      "milliseconds": 2.4441249999999854,
+      "memory": {
+        "rss": 277086208,
+        "heapTotal": 205045760,
+        "heapUsed": 83039592,
+        "external": 2761644,
+        "arrayBuffers": 236870
+      }
+    },
+    "offlineRetrievalAndSnapshot": {
+      "milliseconds": 2321.8483750000005,
+      "memory": {
+        "rss": 736919552,
+        "heapTotal": 280985600,
+        "heapUsed": 168976936,
+        "external": 2761689,
+        "arrayBuffers": 236915
+      },
+      "citations": 40,
+      "maxEventLoopGapMilliseconds": 211.0807080000004,
+      "eventLoopTicks": 307,
+      "phases": {
+        "state": {
+          "calls": 1,
+          "totalMilliseconds": 12.39929200000006,
+          "maxMilliseconds": 12.39929200000006
+        },
+        "passagePolicyPage": {
+          "calls": 51,
+          "totalMilliseconds": 370.4770429999953,
+          "maxMilliseconds": 9.140875000000051
+        },
+        "pinnedPassages": {
+          "calls": 1,
+          "totalMilliseconds": 63.8832910000001,
+          "maxMilliseconds": 63.8832910000001
+        },
+        "candidateSearchWorker": {
+          "calls": 1,
+          "totalMilliseconds": 847.5074169999998,
+          "maxMilliseconds": 847.5074169999998
+        },
+        "snapshotWorker": {
+          "calls": 1,
+          "totalMilliseconds": 703.4671249999992,
+          "maxMilliseconds": 703.4671249999992
+        },
+        "saveRun": {
+          "calls": 1,
+          "totalMilliseconds": 195.1875830000008,
+          "maxMilliseconds": 195.1875830000008
+        }
+      }
+    }
+  },
+  "outcome": "functional assertions passed; raw timings require review against declared hardware budgets",
+  "finishedAt": "2026-09-30T14:02:28.291Z",
+  "peakResidentSetKilobytes": 724544
+}

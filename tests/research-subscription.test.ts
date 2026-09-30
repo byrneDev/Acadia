@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { subscribeResearch } from "../src/renderer/components/researchSubscription";
+import {
+  researchHealth,
+  retryResearchRefresh,
+  subscribeResearch,
+} from "../src/renderer/components/researchSubscription";
 import type { ResearchState } from "../src/shared/research";
 
 const empty = (): ResearchState => ({
@@ -32,6 +36,32 @@ function setup(read = vi.fn().mockResolvedValue(empty())) {
 }
 
 describe("shared research event reads", () => {
+  it("retains the last research view after a failed refresh and clears its stale warning on retry", async () => {
+    const initial = empty(),
+      refreshed = empty();
+    const api = setup(
+      vi
+        .fn()
+        .mockResolvedValueOnce(initial)
+        .mockRejectedValueOnce(new Error("Storage unavailable"))
+        .mockResolvedValue(refreshed),
+    );
+    const listener = vi.fn();
+    disposers.push(subscribeResearch("stale-project", listener));
+    await vi.advanceTimersByTimeAsync(40);
+    const lastSuccess = researchHealth("stale-project").lastSuccess;
+    api.changed();
+    await vi.advanceTimersByTimeAsync(40);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(researchHealth("stale-project")).toEqual({
+      stale: true,
+      lastSuccess,
+    });
+    retryResearchRefresh("stale-project");
+    await vi.advanceTimersByTimeAsync(40);
+    expect(listener).toHaveBeenLastCalledWith(refreshed);
+    expect(researchHealth("stale-project").stale).toBe(false);
+  });
   it("shares one listener and coalesces a progress burst across views", async () => {
     const api = setup();
     const first = vi.fn(),

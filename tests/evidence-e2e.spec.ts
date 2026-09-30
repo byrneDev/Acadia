@@ -253,7 +253,10 @@ test("Cedar investigation retrieves late evidence, links counterevidence, and tu
   );
   await closeReader(page);
   const state = await page.evaluate(() => window.acadia!.researchState());
-  const run = state.runs.find((r) => r.kind === "answer")!;
+  const run = await page.evaluate(
+    (id) => window.acadia!.getAnalysisRun(id),
+    state.runs.find((r) => r.kind === "answer")!.id,
+  );
   expect(
     run.citations.filter(
       (c) => c.sourceTitle === "Lab study" || c.sourceTitle === "Lab duplicate",
@@ -299,7 +302,12 @@ test("editing a report keeps the selected released version private and citations
   await page
     .getByRole("button", { name: "Save & release", exact: true })
     .click();
-  await page.getByRole("button", { name: /Release with limitations|Release reviewed revision/, exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: /Release with limitations|Release reviewed revision/,
+      exact: true,
+    })
+    .click();
   await expect
     .poll(async () => (await project(page)).outputs[0].releasedRevisionId)
     .toBeTruthy();
@@ -383,7 +391,12 @@ test("editing a report keeps the selected released version private and citations
   await page
     .getByRole("button", { name: "Save & release", exact: true })
     .click();
-  await page.getByRole("button", { name: /Release with limitations|Release reviewed revision/, exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: /Release with limitations|Release reviewed revision/,
+      exact: true,
+    })
+    .click();
   await expect(audience.getByLabel("Released report")).toContainText(
     "PRIVATE FOLLOW-UP",
   );

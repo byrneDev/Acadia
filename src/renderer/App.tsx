@@ -90,6 +90,16 @@ import {
 import type { DesktopCommand } from "../shared/desktop";
 import { PedigreeWorkspace } from "./components/PedigreeWorkspace";
 import { MethodsWorkspace } from "./components/MethodsWorkspace";
+import { hydrateDrafts, flushDrafts } from "./components/durableDrafts";
+import { clearWorkspaceDraftFallbacks } from "./components/workspaceViewState";
+import { MaintenancePanel } from "./components/MaintenancePanel";
+import {
+  ResearchRefreshNotice,
+  registerWorkspaceRecovery,
+  DraftRecoveryNotice,
+} from "./components/WorkspaceRecovery";
+import { ResearchGuide } from "./components/ResearchGuide";
+import { createGuidedSample } from "./guidedSample";
 const viewLabels = {
   brief: "Research brief",
   board: "Board",
@@ -156,6 +166,20 @@ export default function App() {
   );
   const [globalSearch, setGlobalSearch] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [maintenance, setMaintenance] = useState(false);
+  const [welcome, setWelcome] = useState(() => {
+    try {
+      return localStorage.getItem("acadia-guide-dismissed:v1") !== "true";
+    } catch {
+      return true;
+    }
+  });
+  const dismissWelcome = () => {
+    setWelcome(false);
+    try {
+      localStorage.setItem("acadia-guide-dismissed:v1", "true");
+    } catch {}
+  };
   const [reportRequest, setReportRequest] = useState<{
     id: string;
     key: number;
@@ -292,6 +316,8 @@ export default function App() {
   const [projectMenu, setProjectMenu] = useState(false);
   const latest = useRef<Project | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openingProject, setOpeningProject] = useState(false);
+  const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
   const addPosition = useRef<{ x: number; y: number } | null>(null);
   const loaded = useRef(false);
   const savePromise = useRef<Promise<unknown>>(Promise.resolve());
@@ -321,7 +347,8 @@ export default function App() {
   useEffect(() => {
     api()
       .load()
-      .then((s) => {
+      .then(async (s) => {
+        if (!outputWindow) await hydrateDrafts(s.project.id);
         latest.current = s.project;
         setProject(s.project);
         restoreNavigation(s.project);
@@ -417,8 +444,12 @@ export default function App() {
   }, [toast]);
   useEffect(() => {
     if (outputWindow) return;
+    registerWorkspaceRecovery(async () => {
+      if (latest.current) await api().save(latest.current);
+    });
     return api().onBeforeClose(async () => {
       window.dispatchEvent(new Event("acadia:flush-report"));
+      await flushDrafts(latest.current?.id);
       if (latest.current) await api().save(latest.current);
     });
   }, [outputWindow]);
@@ -761,9 +792,11 @@ export default function App() {
     window.dispatchEvent(new Event("acadia:flush-report"));
     setBusy(true);
     try {
+      await flushDrafts(latest.current?.id);
       await savePromise.current;
       if (latest.current) await api().save(latest.current);
       const s = await api().switchProject(id);
+      await hydrateDrafts(s.project.id);
       latest.current = s.project;
       setProject(s.project);
       setSettings(s.settings);
@@ -780,6 +813,48 @@ export default function App() {
       setBusy(false);
     }
   };
+  const startPractice = async (kind: "software" | "curriculum") => {
+    setBusy(true);
+    setError("");
+    try {
+      window.dispatchEvent(new Event("acadia:flush-report"));
+      await flushDrafts(latest.current?.id);
+      await savePromise.current;
+      if (latest.current) await api().save(latest.current);
+      const workspace = await createGuidedSample(kind);
+      await hydrateDrafts(workspace.project.id);
+      latest.current = workspace.project;
+      setProject(workspace.project);
+      setSettings(workspace.settings);
+      setHistory([]);
+      setFuture([]);
+      setSelected(null);
+      setReader(undefined);
+      restoreNavigation(workspace.project);
+      setTab("collector");
+      setResearchView("board");
+      setDialog(null);
+      dismissWelcome();
+      setToast(
+        "Fictional practice investigation created. Open the workspace guide to follow each step.",
+      );
+    } catch (cause) {
+      // If sample creation was interrupted, show the recoverable active project.
+      const workspace = await api()
+        .load()
+        .catch(() => undefined);
+      if (workspace && workspace.project.id !== latest.current?.id) {
+        await hydrateDrafts(workspace.project.id).catch(() => {});
+        latest.current = workspace.project;
+        setProject(workspace.project);
+        setSettings(workspace.settings);
+        restoreNavigation(workspace.project);
+      }
+      fail(cause);
+    } finally {
+      setBusy(false);
+    }
+  };
   const openCitation = (c: Citation) => {
     if (c.legacyCardId && !c.passageId) focusSource(c.legacyCardId);
     else
@@ -790,15 +865,20 @@ export default function App() {
       });
   };
   const newOrOpen = async (action: "new" | "open") => {
+    setOpeningProject(true);
     window.dispatchEvent(new Event("acadia:flush-report"));
     setBusy(true);
     setProjectMenu(false);
     try {
+      await flushDrafts(latest.current?.id);
       await savePromise.current;
       if (latest.current) await api().save(latest.current);
       const s =
         action === "new" ? await api().newProject() : await api().openProject();
       if (s) {
+        if (action === "open") clearWorkspaceDraftFallbacks(s.project.id);
+        await hydrateDrafts(s.project.id, action === "open");
+        if (action === "open") setWorkspaceEpoch((value) => value + 1);
         latest.current = s.project;
         setProject(s.project);
         setSettings(s.settings);
@@ -814,6 +894,7 @@ export default function App() {
     } catch (e) {
       fail(e);
     } finally {
+      setOpeningProject(false);
       setBusy(false);
       setDialog(null);
     }
@@ -823,6 +904,9 @@ export default function App() {
     setBusy(true);
     setProjectMenu(false);
     try {
+      await flushDrafts(latest.current?.id);
+      await savePromise.current;
+      if (latest.current) await api().save(latest.current);
       const path = await api().exportProject(latest.current!);
       if (path) setToast("Portable project exported with its attachments");
     } catch (e) {
@@ -965,10 +1049,33 @@ export default function App() {
         <p role={error ? "alert" : "status"}>
           {error || "Opening your research workspace…"}
         </p>
+        {error && !outputWindow && (
+          <>
+            <button
+              className="button primary"
+              onClick={() => window.location.reload()}
+            >
+              Retry opening workspace
+            </button>
+            <button
+              className="button quiet"
+              onClick={() => setMaintenance(true)}
+            >
+              Backup, recovery and updates
+            </button>
+            {maintenance && (
+              <MaintenancePanel
+                onClose={() => setMaintenance(false)}
+                onError={fail}
+              />
+            )}
+          </>
+        )}
       </div>
     );
   return (
     <BoardMappingProvider
+      key={workspaceEpoch}
       value={
         outputWindow
           ? undefined
@@ -978,7 +1085,11 @@ export default function App() {
       <div
         className={`app desktop-app ${outputWindow ? "output-display" : ""}`}
       >
-        <div className="desktop-layout" style={paneStyle}>
+        <div
+          className="desktop-layout"
+          style={paneStyle}
+          inert={openingProject || undefined}
+        >
           {!outputWindow && navigationOpen && (
             <>
               <aside
@@ -1296,6 +1407,39 @@ export default function App() {
                 role="tabpanel"
                 aria-labelledby={outputWindow ? undefined : `${tab}-tab`}
               >
+                {!outputWindow && welcome && (
+                  <aside
+                    className="workspace-welcome"
+                    aria-label="Getting started"
+                  >
+                    <span>
+                      <strong>
+                        Follow the evidence from question to deliverable.
+                      </strong>{" "}
+                      Explore a separate fictional practice project, or begin
+                      your own investigation.
+                    </span>
+                    <button
+                      className="button quiet"
+                      onClick={() => setDialog("help")}
+                    >
+                      Explore the research workflow
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-label="Dismiss getting started"
+                      onClick={dismissWelcome}
+                    >
+                      <X size={16} />
+                    </button>
+                  </aside>
+                )}
+                {!outputWindow && (
+                  <>
+                    <ResearchRefreshNotice projectId={project.id} />
+                    <DraftRecoveryNotice projectId={project.id} />
+                  </>
+                )}
                 {tab === "collector" ? (
                   <>
                     <div className="collector-toolbar">
@@ -1732,6 +1876,25 @@ export default function App() {
                           : settings
                       }
                       onOutput={output}
+                      onPersistOutput={async (saved) => {
+                        const current = latest.current;
+                        if (!current || current.id !== project.id)
+                          throw new Error(
+                            "Return to this investigation before saving its report.",
+                          );
+                        const next = {
+                          ...current,
+                          outputs: current.outputs.map((entry) =>
+                            entry.id === saved.id ? saved : entry,
+                          ),
+                          updatedAt: new Date().toISOString(),
+                        };
+                        latest.current = next;
+                        setProject(next);
+                        const pending = api().save(next);
+                        savePromise.current = pending;
+                        await pending;
+                      }}
                       onUpdateOutput={(o) =>
                         change(
                           (p) =>
@@ -2156,74 +2319,33 @@ export default function App() {
           />
         )}
         {dialog === "help" && (
-          <Modal
-            title="From fragments to understanding"
-            subtitle="One workspace. Two complementary ways of thinking."
+          <ResearchGuide
+            busy={busy}
+            error={error}
             onClose={() => setDialog(null)}
-            wide
-          >
-            <div className="guide-brand">
-              <img
-                className="acadia-logo guide-logo"
-                src={acadiaLogo}
-                alt="Acadia"
-              />
-            </div>
-            <div className="guide-grid">
-              <section>
-                <Network size={25} />
-                <h3>The Collector</h3>
-                <p>
-                  Add notes, questions, hypotheses, and links. Import files or
-                  drop them onto the canvas. Paste text or a URL directly onto
-                  the board.
-                </p>
-                <p>
-                  Drag cards to arrange your thinking. Join the right handle of
-                  one card to the left handle of another. Click a connection to
-                  describe what it means.
-                </p>
-                <p>
-                  Use two fingers to pan, pinch to zoom, or enable the hand tool
-                  for a touchscreen. Fit board brings every card back into view.
-                </p>
-              </section>
-              <section>
-                <Sparkles size={25} />
-                <h3>The Releaser</h3>
-                <p>
-                  Turn your collected text into a hypothesis, research plan,
-                  whitepaper, gap analysis, or needs analysis. Follow source
-                  references back to the board.
-                </p>
-                <p>
-                  The offline engine organizes evidence without AI. Configure a
-                  local Ollama model or compatible API for AI synthesis. Review
-                  generated claims before use.
-                </p>
-                <p>
-                  Present creates a separate output window for a second monitor.
-                  Export releases as Markdown, DOCX, or PDF.
-                </p>
-              </section>
-            </div>
-            <p className="settings-note">
-              Sources stores complete document passages and dated website
-              captures. Run local English OCR for scanned pages. Evidence
-              distinguishes support from contradictions; Tasks track gaps.
-              Approve each external search in Discover. Save a report revision
-              and release it explicitly to show it on the second display. Export
-              editable DOCX, PDF, or Markdown.
-            </p>
-            <div className="modal-actions">
-              <button
-                className="button primary"
-                onClick={() => setDialog(null)}
-              >
-                Back to research
-              </button>
-            </div>
-          </Modal>
+            onNavigate={(view) => {
+              setDialog(null);
+              dismissWelcome();
+              setReader(undefined);
+              if (view === "releaser") setTab("releaser");
+              else {
+                setTab("collector");
+                setResearchView(view);
+              }
+            }}
+            onMaintenance={() => {
+              setDialog(null);
+              setMaintenance(true);
+            }}
+            onSample={(kind) => void startPractice(kind)}
+          />
+        )}
+
+        {maintenance && !outputWindow && (
+          <MaintenancePanel
+            onClose={() => setMaintenance(false)}
+            onError={fail}
+          />
         )}
       </div>
     </BoardMappingProvider>

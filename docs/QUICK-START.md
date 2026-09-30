@@ -1,6 +1,8 @@
-# Acadia v0.5 — quick start
+# Acadia v1 release candidate — quick start
 
 Acadia connects a research question to saved evidence, researcher assessments, and an editable report. The desktop interface retains the Acadia logo and lime accent while following the operating system’s appearance. The Collector is your research workspace; the Releaser develops reports and presents explicitly released revisions.
+
+**This guide describes 1.0.0-rc.1 source behavior. V0.5.0 remains the published release; see [v1 validation](VALIDATION-v1.0.md) for candidate checks and pending production gates.**
 
 Download the package for your platform from [GitHub Releases](https://github.com/byrneDev/Acadia/releases). For Ubuntu 24.04 x64 installation and troubleshooting, see [Acadia on Ubuntu](LINUX.md). Consult the release notes for the validation status of your exact build.
 
@@ -8,15 +10,17 @@ Download the package for your platform from [GitHub Releases](https://github.com
 
 Use the project switcher and menu in the navigation sidebar to create a research board, open the **Project library**, import a portable `.acadia` project, or export one. Investigations stay in a local SQLite database. Switching projects does not require an export. Click the title to define the question and decision you want to investigate.
 
+In **Workspace guide**, create either a fictional software or curriculum practice investigation. Each is separate from your current project and includes conflicting observations, an unreviewed finding, an open gap, follow-up work, a proposed decision and a draft deliverable. No model call or human acceptance is manufactured.
+
 An optional fictional sample, `Library-hours-sample.acadia`, accompanies the release. Its survey favors later opening, its pilot provides counterevidence, and its missing information prevents a confident recommendation. It is a training example, not a real study.
 
 ## Desktop controls
 
 **Appearance** in the sidebar offers System, Light, and Dark themes and comfortable, compact, or touch-sized controls. Navigation can collapse, and the navigation and source-reader dividers can be dragged or adjusted with arrow keys while focused. Desktop preferences and view positions stay on this computer; they are not part of portable research archives.
 
-Use **Cmd/Ctrl+K** for commands and **Cmd/Ctrl+F** to search the investigation. The platform menu lists shortcuts for importing, opening projects, and presenting. Undo/redo follows the focused board or editor. In the focused board, **F** fits the view, **C** starts a connection from a selected item, and **Shift+F10** opens board actions. **Board items** reveals the optional list without confusing board cards with the Sources library.
+Use **Cmd/Ctrl+K** for commands and **Cmd/Ctrl+F** to search the investigation. The platform menu lists shortcuts for importing, opening projects, and presenting. Undo/redo follows the focused board or editor. In the focused board, **F** fits the view, **C** starts a connection from a selected item, and **Shift+F10** opens board actions. Arrow keys move selected board items in 10-unit steps; hold Shift for 40-unit steps. Editing text fields keeps their normal keyboard behavior. **Board items** reveals the optional list without confusing board cards with the Sources library.
 
-The board remembers its position. Releaser remembers the selected report/revision, instructions, and scroll position. Source evidence forms survive closing/reopening the reader during the current app session; save them before quitting. The reader displays up to 40 passages at once and citation links jump to the correct page of passages automatically.
+The board remembers its position. Releaser remembers the selected report/revision, instructions, and scroll position. Private research drafts show save/recovery/conflict status and remain separate from explicitly saved records. Use the editor’s Save action to apply an assessment, or explicitly discard the buffer. Drafts are flushed before a project switch or normal close; a failed save keeps the workspace open for recovery. Source and passage searches use pages with total counts; citation links retain the exact historical passage.
 
 ## Collector views
 
@@ -36,7 +40,7 @@ Use Include, Pin, or Exclude for each source or passage. Pin relevant material t
 
 Imports run in the background. The activity strip shows progress, failures, and cancellation. Failed and scanned extraction is visibly distinguished from ready text. The reader provides retry and **Run English OCR**. PDF pages are rendered before local Tesseract recognition; the English language data ships with the application. No OCR service or model download is required.
 
-Every reprocessing creates a new source version. Earlier citations keep their original passages. OCR passages are labeled so you can verify them against the original. An empty result may indicate a blank or unreadable page. Partial extraction never means the whole source was analyzed.
+Every reprocessing creates a new source version. Earlier citations keep their original passages. OCR passages are labeled. **Compare with original page** displays the saved PDF page beside the extracted text so you can inspect numbers, wording and omissions. An empty result may indicate a blank or unreadable page. Partial extraction never means the whole source was analyzed.
 
 Public web capture stores a dated, sanitized, readable snapshot and paragraph locations. It does not log into sites or run page scripts. For inaccessible, login-dependent, or unsuitable pages, import a PDF or add a note with the excerpt and source URL. Audio/video transcription and quantitative dataset analysis are outside this release.
 
@@ -44,7 +48,7 @@ Public web capture stores a dated, sanitized, readable snapshot and paragraph lo
 
 Open **Research engine settings**. Each project explicitly uses **Local** or **Server or cloud** analysis. A remote server through an SSH tunnel still requires the server/cloud choice. Local mode supports the offline outline engine or a model at a loopback address. Server/cloud mode requires a selected provider endpoint and model. Acadia never silently falls back to a cloud service.
 
-**Find installed models** queries a local Ollama service only when clicked. **Test connection** checks the model inventory without submitting research or generating text; it does not verify generation or billing availability. Named connection presets remember the endpoint, model, and privacy choice without API keys. A different authenticated connection may require entering its key again.
+**Find installed models** queries a local Ollama service only when clicked. **Test connection** checks the model inventory without submitting research or generating text; it does not verify generation or billing availability. **Test synthetic generation** separately checks a small fictional arithmetic response using the chosen model; it sends no research passages and does not establish analysis quality. Credential status shows secure/session-only/absent storage, and explicit removal controls clear saved keys. Named connection presets remember the endpoint, model, and privacy choice without API keys. A different authenticated connection may require entering its key again.
 
 The offline engine organizes retrieved evidence and limitations; it does not infer conclusions. For AI synthesis, run your own Ollama model or enter a compatible chat-completions endpoint. Acadia does not install a language model. Model responses must follow the requested citation structure; an unsupported response is reported as a failure rather than applied.
 
@@ -54,7 +58,7 @@ Brave Search is independent of analysis. Add an optional Brave Search API key in
 
 ## Write and release a report
 
-In **Releaser**, select **New report**, then choose a decision brief, hypothesis, research plan, whitepaper, gap analysis, or needs analysis. The report composer opens automatically when there are no reports. Build an evidence brief or generate an AI draft. Edit headings, paragraphs, lists, tables, and persistent numbered citations directly. Click a citation to open its exact saved passage beside the report. **Reports and evidence** shows the report library, outline, and source index when needed.
+In **Releaser**, select **New report**, then choose a decision brief, hypothesis, research plan, whitepaper, gap analysis, or needs analysis. The report composer opens automatically when there are no reports. Build an evidence brief or generate an AI draft. Edit headings, paragraphs, lists, tables, and persistent numbered citations directly. **Cite source passage** inserts an exact saved reference into your own writing without AI. Click a citation to open its historical passage beside the report. **Reports and evidence** shows the report library, outline, and source index when needed.
 
 Select a section and request an AI revision. Acadia previews the proposal before applying it. Other writing and citations stay intact. If the selected text changed while a revision ran, select it again. Offline mode cannot perform AI revisions.
 
@@ -68,20 +72,26 @@ Connect your monitor or TV through your operating system, select **Present**, th
 
 The app saves locally and waits for the Collector's final save on close. Interrupted background work is marked for explicit retry at the next launch. The first migration backs up the legacy JSON and attachment manifest before its database transaction. Original files remain separate from database records.
 
-Acadia v0.5 writes version 4 `.acadia` archives, including linked board references, gap and decision revisions, source versions, historical passages, originals, evidence, tasks, reports and analytical pedigree. **Opening v4 requires Acadia v0.5 or later**; v0.4 cannot read it. Versions 1–3 remain importable with missing assessments initially unassessed. Archives exclude credentials and rebuildable search indexes. Importing a project already in the library replaces that investigation after saving a recovery archive. Old card-level citations remain labeled until originals are reprocessed; existing reports retain their legacy references. A missing linked record remains visibly unavailable on the board.
+The v1 candidate writes version 5 `.acadia` archives, including linked board references, gap and decision revisions, source versions, historical passages, originals, evidence, tasks, reports and analytical pedigree. **Opening v5 requires Acadia v1.0 or a v1 prerelease**; v0.5 cannot read it. Versions 1–4 remain importable with missing assessments initially unassessed. Archives include private draft buffers and exclude credentials and rebuildable search indexes. Importing a project already in the library replaces that investigation after saving a recovery archive. Old card-level citations remain labeled until originals are reprocessed; existing reports retain their legacy references. A missing linked record remains visibly unavailable on the board.
 
-Each attachment is limited to 250 MB and portable archives to approximately 1 GB. These are storage safety limits, not leading-text or page-count cutoffs. Recovery archives and old source versions consume disk space; keep separate backups before managing application data.
+Each attachment is limited to 250 MB. Portable archives also limit each stored entry, including research history, to 250 MB; board/report JSON to 50 MB; the attachment catalog to 5 MB; originals to 5,000 files; and total expanded/compressed size to 1 GB. Export applies the same limits as import. If historical snapshots or originals exceed them, use a checked whole-library backup before splitting the investigation. These are storage safety limits, not leading-text or page-count cutoffs. Recovery archives and old source versions consume disk space; keep separate backups before managing application data.
 
-## Item summaries and human review in v0.5
+## Item summaries and human review
 
 For any collected card, use its sparkle button or select **AI summary & research advice** in its details. In the source reader, the same action reviews the selected saved version. Choose **Summarize & advise** to use the project's configured model. Opening the dialog alone does not call AI.
 
 The saved response explains the item, possible uses in your investigation, limitations, and suggested next steps. References open the exact passages used. Long documents use a distributed passage sample with coverage shown; unreadable media or uncaptured websites require extracted text, notes, or a transcript. A linked source passage summarizes that exact historical passage. A method, finding or other analytical record is labeled as researcher work, not another independent source. Advice never changes your notes, review status, board connections, or tasks automatically. Summary history remains available after restarting and in portable project exports. Changed linked records prompt review or regeneration; excluded sources and passages remain excluded.
 
-Under **Review and accept**, edit the proposed **Reviewer Notes** and inspect their numbered source references. Confirm **I have reviewed these notes and their source references**, then choose **Accept into Reviewer Notes**. The accepted text appears in the item's Reviewer Notes field and in Evidence as a dated, linked record. Original item notes and the AI proposal are preserved. Acceptance records your interpretation with context links; it does not automatically mark the claim supported or count it as another independent source. Each saved AI summary can be accepted once, and later accepted summaries add separate entries. Accepted notes and their historical references survive restart and portable export/import. Unaccepted edits remain available while you inspect passages during the current app session.
+Under **Review and accept**, edit the proposed **Reviewer Notes** and inspect their numbered source references. Confirm **I have reviewed these notes and their source references**, then choose **Accept into Reviewer Notes**. The accepted text appears in the item's Reviewer Notes field and in Evidence as a dated, linked record. Original item notes and the AI proposal are preserved. Acceptance records your interpretation with context links; it does not automatically mark the claim supported or count it as another independent source. Each saved AI summary can be accepted once, and later accepted summaries add separate entries. Accepted notes and their historical references survive restart and portable export/import. Unaccepted review drafts are saved privately; accepting them remains an explicit human action.
 
 ## Research methods and delivery
 
 The methods, GUI refresh, deliverable planning and data exports introduced in v0.4 remain available. Start in Research brief, appraise sources in their reader, then assess findings and assumptions in Evidence. Under **Add item → Apply methods**, choose a method and **Add worksheet to board**, then select its card and **Open worksheet**. The same worksheets remain available in Methods. Challenge analysis is an explicit optional AI action. In Releaser, preview the analytical pedigree appendix and review limitations before release.
 
-After an analysis, choose Plan a deliverable for software, curriculum or another intervention. Review the resulting work packages before exporting to a PMIS. Project menu → Export data for Power BI creates linked local CSV tables and import guidance. See [Research methods](RESEARCH-METHODS.md), [Power BI](POWER-BI.md), and [v0.5 validation](VALIDATION-v0.5.md).
+After an analysis, choose **Plan a deliverable** for software, curriculum or another intervention. Link saved gaps and findings by revision, record a requirement or learning objective for each work package, define its acceptance test and attach verification passages. Review the PMIS mapping preview; retain destination IDs before repeating an import. Completing work never automatically resolves the research gap. **Close — keep draft** preserves private plan edits; **Save work packages** applies them to the report. Project menu → Export data for Power BI creates linked local CSV tables and import guidance. See [Research methods](RESEARCH-METHODS.md), [PMIS handoff](PMIS-HANDOFF.md), [Power BI](POWER-BI.md), and [v1 validation](VALIDATION-v1.0.md).
+
+## Maintain this installation
+
+Open **Backup, recovery and updates** from the Project menu. **Create backup…** creates a checked whole-library copy with originals and private drafts, excluding credentials. **Restore a checked backup…** validates a selected backup, preserves the current workspace and restarts Acadia. Keep an independent copy on another disk; a same-disk recovery folder is not disaster recovery.
+
+A manual update check reads public GitHub release metadata only and offers the matching download; it never installs anything. Export redacted diagnostics for support when useful, reviewing the visible contents first. See [Recovery](RECOVERY.md) for the exact backup, restore and failure behavior. Physical device checks, real PMIS/Power BI imports and production signing remain separately recorded acceptance work.

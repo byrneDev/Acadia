@@ -248,7 +248,7 @@ describe("canonical research-to-delivery board references", () => {
       undefined,
       board.cards,
     );
-    expect(archive.schemaVersion).toBe(4);
+    expect(archive.schemaVersion).toBe(5);
     expect(archive.pedigree?.gaps[0].id).toBe(gap.id);
     expect(archive.pedigree?.decisions[0].id).toBe(decision.id);
     const destination = fixture();
@@ -510,7 +510,7 @@ describe("canonical research-to-delivery board references", () => {
     }
     const migrated = new ResearchStore(path);
     openStores.add(migrated);
-    expect(migrated.migrationBackupPath).toContain("to-v4");
+    expect(migrated.migrationBackupPath).toContain("to-v5");
     const backup = new DatabaseSync(migrated.migrationBackupPath!, {
       readOnly: true,
     });
@@ -521,7 +521,7 @@ describe("canonical research-to-delivery board references", () => {
     } finally {
       backup.close();
     }
-    expect(migrated.getProject(project.id)?.schemaVersion).toBe(4);
+    expect(migrated.getProject(project.id)?.schemaVersion).toBe(5);
     expect(migrated.getSource(source.source.id).source).toMatchObject({
       derived: true,
       inclusion: "exclude",

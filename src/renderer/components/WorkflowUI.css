@@ -1,0 +1,127 @@
+.search-page-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 18px;
+}
+.search-page-navigation button {
+  min-height: var(--control-height, 36px);
+  padding: 6px 12px;
+}
+.search-results > section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.search-results > section h3 {
+  font-size: 14px;
+  margin: 14px 0 3px;
+}
+.citation-passage-results {
+  max-height: 280px;
+  overflow: auto;
+}
+.citation-passage-preview {
+  max-height: 230px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.original-page-comparison,
+.draft-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.original-page-comparison img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: white;
+}
+.original-page-comparison blockquote {
+  white-space: pre-wrap;
+  max-height: 65vh;
+  overflow: auto;
+}
+.original-page-comparison section {
+  min-width: 0;
+}
+.original-page-comparison {
+  max-height: 70vh;
+  overflow: auto;
+}
+.draft-comparison textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.private-draft-status {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.private-draft-status > span {
+  display: block;
+  margin-bottom: 8px;
+}
+.private-draft-status button {
+  margin: 4px 8px 4px 0;
+}
+.draft-recovery-status {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  max-height: 160px;
+  overflow: auto;
+}
+.workspace-welcome {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.workspace-welcome > span {
+  flex: 1;
+}
+.workspace-welcome strong {
+  display: block;
+  margin-bottom: 3px;
+}
+.research-guide-steps {
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.research-guide-steps li {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.research-guide-steps h3 {
+  margin-top: 0;
+}
+.research-guide-steps p,
+.research-guide-samples p {
+  line-height: 1.5;
+}
+@media (max-width: 760px) {
+  .original-page-comparison,
+  .draft-comparison,
+  .research-guide-steps {
+    grid-template-columns: 1fr;
+  }
+  .workspace-welcome {
+    flex-wrap: wrap;
+  }
+}

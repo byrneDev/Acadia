@@ -151,7 +151,7 @@ describe("normalized evidence foundation", () => {
       "[This PDF has no extractable text. OCR is not included; open the original.]";
     const positions = project.cards.map((c) => [c.x, c.y]);
     store.saveProject(project);
-    expect(project.schemaVersion).toBe(4);
+    expect(project.schemaVersion).toBe(5);
     expect(project.cards.map((c) => [c.x, c.y])).toEqual(positions);
     expect(project.cards[0].extraction).toBeUndefined();
     expect(store.getSource(project.cards[0].sourceId!).passages).toHaveLength(
@@ -413,6 +413,59 @@ describe("complete document ingestion and safe capture", () => {
     expect(detail.passages[0].text).toMatch(/evidence remains traceable/i);
     expect(detail.versions.at(-1)?.status).toBe("ready");
   }, 30000);
+  it("settles active and queued extraction jobs before shutdown closes the library", async () => {
+    const { root, store, project } = await fixture();
+    const assetId = randomUUID(),
+      name = `${assetId}.txt`;
+    await writeFile(
+      join(root, "assets", name),
+      Array(1000).fill("Recoverable source paragraph.").join("\n\n"),
+    );
+    project.cards = Array.from({ length: 5 }, (_, index) => ({
+      ...card(project, index + 1, ""),
+      kind: "document" as const,
+      assetId,
+    }));
+    store.saveProject(project);
+    const service = new Ingestion(store, root, () => ({
+      id: assetId,
+      fileName: "original.txt",
+      storedName: name,
+      mimeType: "text/plain",
+      size: 30000,
+    }));
+    let jobs: ResearchJob[] = [];
+    try {
+      jobs = project.cards.map((card) =>
+        service.startFile(project.id, card.sourceId!),
+      );
+    } finally {
+      await service.shutdown();
+    }
+    expect(jobs.map((job) => store.getJob(job.id)?.status)).toEqual(
+      Array(5).fill("cancelled"),
+    );
+    expect(() =>
+      service.startFile(project.id, project.cards[0].sourceId!),
+    ).toThrow(/shutting down/);
+    const restarted = new Ingestion(store, root, () => ({
+      id: assetId,
+      fileName: "original.txt",
+      storedName: name,
+      mimeType: "text/plain",
+      size: 30000,
+    }));
+    try {
+      expect((await complete(store, restarted.retry(jobs[0].id))).status).toBe(
+        "completed",
+      );
+      expect(store.getSource(project.cards[0].sourceId!).passages).toHaveLength(
+        1000,
+      );
+    } finally {
+      await restarted.shutdown();
+    }
+  });
   it("sanitizes web snapshots with stable readable paragraphs and rejects private network addresses", () => {
     const article = readableSnapshot(
       "<html><title>Research</title><body><article><h1>Research</h1><p>" +

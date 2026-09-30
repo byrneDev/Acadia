@@ -11,7 +11,7 @@ import type {
   ProjectPlanContext,
 } from "./types";
 import type { Citation, ReportDocument } from "./research";
-import { validateDeliveryPlan } from "./pmis";
+import { validateDeliveryPlan, validateDeliveryRecordRefs } from "./pmis";
 
 export const OUTPUT_LABELS: Record<OutputKind, string> = {
   hypothesis: "Hypothesis",
@@ -53,7 +53,7 @@ const ASSET_ID =
 export function createBlankProject(): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     privacy: { mode: "local" },
     groups: [],
     views: [],
@@ -282,9 +282,10 @@ export function validateProject(value: unknown): Project {
     p.schemaVersion !== 1 &&
     p.schemaVersion !== 2 &&
     p.schemaVersion !== 3 &&
-    p.schemaVersion !== 4
+    p.schemaVersion !== 4 &&
+    p.schemaVersion !== 5
   )
-    fail("schemaVersion", "is not supported (expected 1, 2, 3, or 4)");
+    fail("schemaVersion", "is not supported (expected 1, 2, 3, 4, or 5)");
   let textSize = 0;
   const budget = (amount: number): void => {
     textSize += amount;
@@ -350,7 +351,11 @@ export function validateProject(value: unknown): Project {
         createdAt: date(c.createdAt, `${path}.createdAt`),
         updatedAt: date(c.updatedAt, `${path}.updatedAt`),
       };
-      if (result.boardReference && p.schemaVersion !== 4)
+      if (
+        result.boardReference &&
+        p.schemaVersion !== 4 &&
+        p.schemaVersion !== 5
+      )
         fail(`${path}.boardReference`, "requires portable project version 4");
       if (
         result.boardReference &&
@@ -639,6 +644,12 @@ export function validateProjectPlanContext(value: unknown): ProjectPlanContext {
         : id(p.analysisRevisionId, "analysis revision"),
     gapClaimId:
       p.gapClaimId === undefined ? undefined : id(p.gapClaimId, "gap finding"),
+    ...(p.gapRefs === undefined
+      ? {}
+      : { gapRefs: validateDeliveryRecordRefs(p.gapRefs) }),
+    ...(p.findingRefs === undefined
+      ? {}
+      : { findingRefs: validateDeliveryRecordRefs(p.findingRefs) }),
     gap: string(p.gap, "gap", 30000),
     deliverableType: member(
       p.deliverableType,
@@ -704,6 +715,10 @@ export function validateCitation(value: unknown, path = "citation"): Citation {
     quote: string(c.quote, `${path}.quote`, 4_000_000),
     url,
     acquiredAt: date(c.acquiredAt, `${path}.acquiredAt`),
+    author: optionalText(c.author, `${path}.author`, 2000),
+    publisher: optionalText(c.publisher, `${path}.publisher`, 2000),
+    publishedAt: optionalText(c.publishedAt, `${path}.publishedAt`, 100),
+    doi: optionalText(c.doi, `${path}.doi`, 1000),
     verified: c.verified === true,
     legacyCardId:
       c.legacyCardId === undefined

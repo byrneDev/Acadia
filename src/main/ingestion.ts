@@ -254,6 +254,40 @@ export class Ingestion {
   private running = new Map<string, Running>();
   private workQueue: (() => void)[] = [];
   private active = 0;
+  private stopping = false;
+  private completions = new Map<
+    string,
+    { promise: Promise<void>; resolve: () => void }
+  >();
+  async shutdown(options: { timeoutMs?: number } = {}): Promise<void> {
+    this.stopping = true;
+    const pending = [...this.completions.values()].map(
+      (entry) => entry.promise,
+    );
+    for (const id of [...this.running.keys()]) this.cancelJob(id);
+    const timeoutMs = options.timeoutMs ?? 10_000;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000)
+      throw new Error("Invalid extraction shutdown timeout.");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.all(pending),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  "Extraction workers have not stopped. Keep Acadia open or retry shutdown; completed pages remain saved.",
+                ),
+              ),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
   private drain() {
     while (this.active < 2 && this.workQueue.length) {
       this.active++;
@@ -272,6 +306,8 @@ export class Ingestion {
     label: string,
     sourceId?: string,
   ): ResearchJob {
+    if (this.stopping)
+      throw new Error("Extraction is shutting down; no new jobs can start.");
     const job: ResearchJob = {
       id: randomUUID(),
       projectId,
@@ -294,6 +330,11 @@ export class Ingestion {
     this.onChange();
   }
   private launch(job: ResearchJob, work: (running: Running) => Promise<void>) {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => {
+      resolve = done;
+    });
+    this.completions.set(job.id, { promise, resolve });
     const running: Running = { controller: new AbortController() };
     if (job.sourceId) {
       const detail = this.store.getSource(job.sourceId);
@@ -338,6 +379,8 @@ export class Ingestion {
             await running.terminate?.().catch(() => undefined);
             this.running.delete(job.id);
             this.active--;
+            this.completions.get(job.id)?.resolve();
+            this.completions.delete(job.id);
             this.drain();
           }
         })(),

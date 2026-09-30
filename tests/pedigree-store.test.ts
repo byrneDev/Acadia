@@ -338,7 +338,7 @@ describe("versioned research pedigree", () => {
   it("seeds an explicitly unassessed brief without inventing appraisals or findings", async () => {
     const { store, project } = await fixture();
     const state = store.pedigreeState(project.id);
-    expect(project.schemaVersion).toBe(4);
+    expect(project.schemaVersion).toBe(5);
     expect(state.briefs).toHaveLength(1);
     expect(state.briefs[0]).toMatchObject({
       question: project.question,
@@ -502,7 +502,7 @@ describe("versioned research pedigree", () => {
     ).toBe(passages[0].text);
     expect(frozen.state.findings[0].confidence).toBe("low");
     const archive = store.exportResearch(project.id);
-    expect(archive.schemaVersion).toBe(4);
+    expect(archive.schemaVersion).toBe(5);
     const targetDirectory = await mkdtemp(
       join(tmpdir(), "acadia-pedigree-import-"),
     );
@@ -546,7 +546,7 @@ describe("versioned research pedigree", () => {
     expect(() =>
       store.importResearch(
         project.id,
-        { ...legacy, schemaVersion: 5 },
+        { ...legacy, schemaVersion: 6 },
         { replace: true },
       ),
     ).toThrow(/Unsupported research archive/);
@@ -584,7 +584,7 @@ describe("fixed typed method registry", () => {
   });
 });
 
-describe("SQLite v4 migration recovery", () => {
+describe("SQLite v5 migration recovery", () => {
   it("backs up committed WAL data consistently before transactional migration", async () => {
     const { store, directory, project } = await fixture();
     store.close();
@@ -681,7 +681,7 @@ describe("SQLite v4 migration recovery", () => {
     store.close();
     const path = join(directory, "research.sqlite"),
       future = new DatabaseSync(path);
-    future.exec("PRAGMA user_version=5; PRAGMA wal_checkpoint(TRUNCATE);");
+    future.exec("PRAGMA user_version=6; PRAGMA wal_checkpoint(TRUNCATE);");
     future.close();
     const before = contentHash(await readFile(path));
     expect(() => new ResearchStore(directory)).toThrow(/newer Acadia version/);

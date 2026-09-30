@@ -6,8 +6,10 @@ import type {
   ResearchClaim,
   ResearchState,
   SourceDetail,
+  Passage,
 } from "../../shared/research";
 import { Modal } from "./Dialogs";
+import { OriginalPageComparison } from "./OriginalPageComparison";
 import { SourcePedigree } from "./PedigreeWorkspace";
 import { ReviewerNotes } from "./ReviewerNotes";
 import { AddToBoardButton, useBoardMapping } from "./BoardMappingContext";
@@ -81,8 +83,11 @@ export function SourceReader({
   const [notice, setNotice] = useState("");
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [discardConfirmation, setDiscardConfirmation] = useState(false);
   const [page, setPage] = useState(0);
   const [jump, setJump] = useState("");
+  const [comparison, setComparison] = useState<Passage>();
+  useEffect(() => setComparison(undefined), [sourceId, versionId, version]);
   const body = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const versionSelect = useRef<HTMLSelectElement>(null);
@@ -257,8 +262,8 @@ export function SourceReader({
     >
       <h3>Link evidence</h3>
       <p className="muted">
-        {draft.passage.locator} · This unfinished form stays available when you
-        close and reopen this source during this session.
+        {draft.passage.locator} · This private draft is saved on this computer.
+        Save evidence link to apply it to the investigation.
       </p>
       <blockquote>{draft.quote}</blockquote>
       <label className="field">
@@ -315,9 +320,9 @@ export function SourceReader({
           type="button"
           className="button quiet"
           disabled={saving}
-          onClick={() => updateDraft(undefined)}
+          onClick={() => setDiscardConfirmation(true)}
         >
-          Discard draft
+          Discard draft…
         </button>
         <button
           className="button primary"
@@ -326,6 +331,23 @@ export function SourceReader({
           {saving ? "Saving…" : "Save evidence link"}
         </button>
       </div>
+      {discardConfirmation && (
+        <div role="group" aria-label="Confirm discard evidence draft">
+          <p>Discard this unfinished evidence link?</p>
+          <button type="button" onClick={() => setDiscardConfirmation(false)}>
+            Keep editing
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              updateDraft(undefined);
+              setDiscardConfirmation(false);
+            }}
+          >
+            Discard evidence draft
+          </button>
+        </div>
+      )}
     </form>
   );
   const pagination = detail && detail.passages.length > PASSAGES_PER_PAGE && (
@@ -397,6 +419,13 @@ export function SourceReader({
   );
   const content = (
     <div className="source-reader" ref={body}>
+      {!readOnly && comparison && (
+        <OriginalPageComparison
+          passage={comparison}
+          sourceTitle={detail?.source.title || "Source"}
+          onClose={() => setComparison(undefined)}
+        />
+      )}
       {loadError && (
         <p role="alert" className="reader-load-error">
           {loadError}
@@ -640,6 +669,16 @@ export function SourceReader({
                     )}
                   </div>
                   <p className="passage-text">{p.text}</p>
+                  {!readOnly &&
+                    p.page &&
+                    (v?.assetId || detail.source.assetId) && (
+                      <button
+                        className="text-button"
+                        onClick={() => setComparison(p)}
+                      >
+                        Compare original page {p.page}
+                      </button>
+                    )}
                   {!readOnly && (
                     <AddToBoardButton
                       reference={{

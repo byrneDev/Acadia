@@ -69,6 +69,7 @@ export interface SourceVersion {
   author?: string;
   publisher?: string;
   publishedAt?: string;
+  doi?: string;
   url?: string;
   status: ExtractionStatus;
   method: "native" | "ocr" | "manual" | "legacy";
@@ -109,6 +110,10 @@ export interface Citation {
   quote: string;
   url?: string;
   acquiredAt: string;
+  author?: string;
+  publisher?: string;
+  publishedAt?: string;
+  doi?: string;
   verified: boolean;
   legacyCardId?: string;
 }
@@ -193,6 +198,68 @@ export interface AnalysisRun {
   quotationAssociations?: QuoteAssociation[];
   pedigreeSnapshotId?: string;
   itemInsight?: ItemInsight;
+  /** Routine UI payload only; request full historical inputs with getAnalysisRun. */
+  summaryOnly?: boolean;
+}
+export interface PageRequest {
+  offset?: number;
+  limit?: number;
+}
+export interface ResearchPage<T> {
+  items: T[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+/** Compact internal retrieval inventory; document bodies are loaded only for candidates. */
+export type PassagePolicyEntry = Pick<
+  Passage,
+  "id" | "sourceId" | "versionId" | "method" | "inclusion"
+> & { rowid: number; hasText: boolean };
+export type DraftJSONValue =
+  | null
+  | string
+  | number
+  | boolean
+  | DraftJSONValue[]
+  | { [key: string]: DraftJSONValue };
+export const RESEARCH_DRAFT_KINDS = [
+  "brief",
+  "appraisal",
+  "finding",
+  "assumption",
+  "method",
+  "gap",
+  "decision",
+  "claim",
+  "task",
+  "report",
+  "delivery-plan",
+  "item-review",
+  "source-evidence",
+  "inquiry-text",
+  "origin",
+  "review-issue",
+] as const;
+export type ResearchDraftKind = (typeof RESEARCH_DRAFT_KINDS)[number];
+/** A private editing buffer. It is never evidence, a reviewed record or a release. */
+export interface ResearchDraft {
+  key: string;
+  projectId: string;
+  kind: ResearchDraftKind;
+  targetId?: string;
+  value: DraftJSONValue;
+  revision: number;
+  updatedAt: string;
+}
+export interface ResearchDraftInput {
+  projectId: string;
+  key: string;
+  kind: ResearchDraftKind;
+  targetId?: string;
+  value: DraftJSONValue;
+  /** Zero creates a draft; later writes must match the saved revision. */
+  expectedRevision: number;
 }
 export interface ResearchAnswer {
   answer: string;
@@ -237,6 +304,13 @@ export interface ResearchState {
   jobs: ResearchJob[];
   discoveries: DiscoveryCandidate[];
   runs: AnalysisRun[];
+  runCount?: number;
+  /** Minimal historical basis for accepted notes outside the paged run window. */
+  itemReviewBases?: {
+    runId: string;
+    question: string;
+    briefRevision?: number;
+  }[];
 }
 export interface ProjectSummary {
   id: string;
@@ -297,6 +371,29 @@ export interface SectionProposal {
   runId?: string;
 }
 export interface ResearchAPI {
+  researchDrafts(projectId: string): Promise<ResearchDraft[]>;
+  saveResearchDraft(input: ResearchDraftInput): Promise<ResearchDraft>;
+  deleteResearchDraft(
+    projectId: string,
+    key: string,
+    expectedRevision: number,
+  ): Promise<void>;
+  listSourcesPage(
+    query?: string,
+    page?: PageRequest,
+  ): Promise<ResearchPage<SourceRecord>>;
+  searchSourcesPage(
+    query: string,
+    page?: PageRequest,
+  ): Promise<ResearchPage<SearchHit>>;
+  getSourcePassagesPage(
+    sourceId: string,
+    versionId?: string,
+    query?: string,
+    page?: PageRequest,
+  ): Promise<ResearchPage<Passage>>;
+  listAnalysisRunsPage(page?: PageRequest): Promise<ResearchPage<AnalysisRun>>;
+  getAnalysisRun(id: string): Promise<AnalysisRun>;
   saveGap(value: ResearchGap): Promise<ResearchGap>;
   saveDecision(value: ResearchDecision): Promise<ResearchDecision>;
   addBoardReference(

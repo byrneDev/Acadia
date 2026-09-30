@@ -189,6 +189,154 @@ afterEach(() => {
 });
 
 describe("on-demand critical research with fixed contradictory fixtures", () => {
+  it("projects drafting assessments to substantive fields and numbered passages without losing saved provenance", async () => {
+    const { store, project, service } = fixture();
+    const pedigree = store.pedigreeState(project.id),
+      appraisal = pedigree.appraisals[0];
+    mockModel((input) => {
+      const assessment = input.research_pedigree.source_appraisals[0];
+      expect(assessment).toMatchObject({
+        source: "study",
+        limitations: appraisal.limitations,
+        methods: appraisal.methods,
+        reviewStatus: appraisal.reviewStatus,
+      });
+      expect(assessment.passageLabels).toContain(
+        input.source_passages.find((p: any) => p.passageId === "study-p1")
+          .label,
+      );
+      for (const value of [
+        appraisal.id,
+        appraisal.projectId,
+        appraisal.createdAt,
+      ])
+        expect(JSON.stringify(input.research_pedigree)).not.toContain(value);
+      expect(JSON.stringify(input.researcher_annotations)).not.toContain(
+        "projectId",
+      );
+      return {
+        markdown: `The uncontrolled comparison needs further study [${assessment.passageLabels[0]}].`,
+      };
+    });
+    const output = await service.analyze(project, "decision-brief", "");
+    const run = store.getAnalysisRun(project.id, output.runId!);
+    expect(run.templateVersion).toBe("acadia-evidence-1.0-interface-1");
+    expect(
+      store.getPedigreeSnapshot(run.pedigreeSnapshotId!).state.appraisals,
+    ).toEqual(pedigree.appraisals);
+  });
+  it.each(["ollama", "compatible"] as const)(
+    "uses explicit challenge identifiers and validates a complete %s proposal",
+    async (provider) => {
+      const settings: AISettings =
+        provider === "ollama"
+          ? local
+          : {
+              provider: "compatible",
+              endpoint: "http://127.0.0.1:8080/v1",
+              model: "fixture-model",
+            };
+      const { store, project, service, claim } = fixture(settings);
+      const before = JSON.stringify(store.pedigreeState(project.id));
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: unknown, init?: RequestInit) => {
+          const request = JSON.parse(String(init?.body)),
+            input = JSON.parse(request.messages[1].content);
+          let result: unknown = {
+            support: ["Cedar"],
+            counter: ["Cedar counter"],
+            gaps: ["Cedar unknown"],
+          };
+          if (input.source_passages) {
+            const passage = input.source_passages.find(
+              (p: any) => p.passageId === "study-p1",
+            );
+            expect(passage.citationId).toBeTruthy();
+            expect(passage.id).toBeUndefined();
+            expect(request.messages[0].content).toContain(
+              "source_passages.citationId",
+            );
+            if (provider === "ollama") {
+              expect(request.format.required).toEqual([
+                "summary",
+                "issues",
+                "limitations",
+                "suggestedChanges",
+              ]);
+              const issue = request.format.properties.issues.items;
+              expect(issue.required).toEqual([
+                "category",
+                "summary",
+                "detail",
+                "passageIds",
+                "claimIds",
+                "assumptionIds",
+              ]);
+              expect(issue.properties.passageIds.items.enum).toContain(
+                passage.passageId,
+              );
+              expect(issue.properties.claimIds.items.enum).toContain(claim.id);
+              expect(issue.properties.assumptionIds.maxItems).toBe(0);
+              expect(
+                request.format.properties.suggestedChanges.items.properties
+                  .citationIds.items.enum,
+              ).toContain(passage.citationId);
+              expect(request.format.additionalProperties).toBe(false);
+            } else {
+              expect(request.format).toBeUndefined();
+              expect(request.response_format).toBeUndefined();
+            }
+            result = {
+              summary: "Causal support needs investigation",
+              issues: [
+                {
+                  category: "causal-inference",
+                  summary: "Control missing",
+                  detail: "The comparison cannot isolate causation.",
+                  passageIds: [passage.passageId],
+                  claimIds: [claim.id],
+                  assumptionIds: [],
+                },
+              ],
+              limitations: ["No controlled comparison"],
+              suggestedChanges: [
+                {
+                  original: claim.title,
+                  proposed: `The observed association needs a controlled comparison [${passage.label}].`,
+                  rationale: "Qualify causal wording",
+                  citationIds: [passage.citationId],
+                },
+              ],
+            };
+          }
+          return new Response(
+            JSON.stringify(
+              provider === "ollama"
+                ? { message: { content: JSON.stringify(result) } }
+                : {
+                    choices: [{ message: { content: JSON.stringify(result) } }],
+                  },
+            ),
+          );
+        }),
+      );
+      const job = await completed(
+        store,
+        service.challenge(project, { kind: "finding", id: claim.id }),
+      );
+      expect(job.status, job.message).toBe("completed");
+      const proposal = job.result as ChallengeProposal;
+      expect(proposal.suggestedChanges).toHaveLength(1);
+      expect(
+        proposal.citations.some(
+          (c) => c.id === proposal.suggestedChanges![0].citationIds[0],
+        ),
+      ).toBe(true);
+      expect(store.state(project.id).claims[0].title).toBe(claim.title);
+      expect(JSON.stringify(store.pedigreeState(project.id))).toBe(before);
+    },
+  );
   it("supplies quality, dependent origins, counter pins and relevance limitations, saving proposals without altering assessments", async () => {
     const { store, project, service, claim } = fixture();
     const before = structuredClone(store.pedigreeState(project.id));
@@ -202,7 +350,8 @@ describe("on-demand critical research with fixed contradictory fixtures", () => 
       ).toContain("No concurrent control");
       expect(
         input.research_pedigree.independent_source_groups.map(
-          (group: string[]) => [...group].sort(),
+          (group: { source: string }[]) =>
+            group.map((entry) => entry.source).sort(),
         ),
       ).toContainEqual(["study", "syndication"]);
       expect(
@@ -345,7 +494,7 @@ describe("on-demand critical research with fixed contradictory fixtures", () => 
     mockModel((input) => {
       expect(
         input.source_passages.find((c: any) => c.passageId === "study-p1"),
-      ).toMatchObject({ id: "existing-cite", label: "1" });
+      ).toMatchObject({ citationId: "existing-cite", label: "1" });
       return {
         summary: "Qualify the causal claim",
         issues: [],

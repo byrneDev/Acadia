@@ -243,6 +243,7 @@ function BriefForm({
       <FormActions
         busy={action.busy || draft.saving}
         dirty={draft.dirty}
+        draft={draft}
         notice={action.notice}
         label="Save research brief"
       />
@@ -350,9 +351,9 @@ function AppraisalForm({
       className="pedigree-form"
       onSubmit={(event) => {
         event.preventDefault();
-        void action.save(async () =>
-          draft.saved(await api().saveSourceAppraisal(value)),
-        );
+        void action.save(async () => {
+          await draft.persist((value) => api().saveSourceAppraisal(value));
+        });
       }}
     >
       <TextField
@@ -408,6 +409,7 @@ function AppraisalForm({
       <FormActions
         busy={action.busy}
         dirty={draft.dirty}
+        draft={draft}
         notice={action.notice}
         label="Save source appraisal"
       />
@@ -500,8 +502,10 @@ function OriginForm({
         onSubmit={(event) => {
           event.preventDefault();
           void action.save(async () => {
-            const result = await api().saveOriginRelationship(value);
-            draft.saved(result, { ...initial, ...entityMeta(project.id) });
+            await draft.persist(
+              (value) => api().saveOriginRelationship(value),
+              { ...initial, ...entityMeta(project.id) },
+            );
           });
         }}
       >
@@ -543,6 +547,7 @@ function OriginForm({
           busy={action.busy}
           disabled={!value.relatedSourceId}
           dirty={draft.dirty}
+          draft={draft}
           notice={action.notice}
           label="Save origin relationship"
         />
@@ -599,9 +604,9 @@ function FindingForm({
         className="pedigree-form"
         onSubmit={(event) => {
           event.preventDefault();
-          void action.save(async () =>
-            draft.saved(await api().saveFindingAssessment(value)),
-          );
+          void action.save(async () => {
+            await draft.persist((value) => api().saveFindingAssessment(value));
+          });
         }}
       >
         <SelectField
@@ -682,6 +687,7 @@ function FindingForm({
         <FormActions
           busy={action.busy}
           dirty={draft.dirty}
+          draft={draft}
           notice={action.notice}
           label="Save finding assessment"
         />
@@ -775,9 +781,8 @@ function AssumptionForm({
       onSubmit={(event) => {
         event.preventDefault();
         void action.save(async () => {
-          const result = await api().saveAssumption(value);
-          draft.saved(
-            result,
+          await draft.persist(
+            (value) => api().saveAssumption(value),
             initial ? undefined : { ...empty, ...entityMeta(project.id) },
           );
           onSaved();
@@ -842,6 +847,7 @@ function AssumptionForm({
       <FormActions
         busy={action.busy}
         dirty={draft.dirty}
+        draft={draft}
         notice={action.notice}
         label={initial ? "Save assumption revision" : "Save assumption"}
       >
@@ -854,7 +860,7 @@ function AssumptionForm({
           onClick={() =>
             action.save(async () => {
               const saved = await api().saveAssumption(value);
-              draft.saved(saved);
+              await draft.saved(saved);
               const sourceIds = [
                 ...new Set(
                   (
@@ -876,7 +882,7 @@ function AssumptionForm({
                 sourceIds,
                 updatedAt: new Date().toISOString(),
               });
-              draft.saved(
+              await draft.saved(
                 saved,
                 initial ? undefined : createAssumption(project.id),
               );

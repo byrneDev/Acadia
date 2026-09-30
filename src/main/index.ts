@@ -16,6 +16,7 @@ import {
 } from "electron";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, rename, stat } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import { basename, extname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import AdmZip from "adm-zip";
@@ -59,7 +60,20 @@ import {
   setDesktopMenuEnabled,
   type WindowKind,
 } from "./desktop";
-import { listLocalModels, testAIConnection } from "./model-connection";
+import {
+  listLocalModels,
+  testAIConnection,
+  testAIGeneration,
+} from "./model-connection";
+import {
+  createWorkspaceBackup,
+  listWorkspaceBackups,
+  validateWorkspaceBackup,
+  restoreWorkspaceBackup,
+  releaseUpdate,
+  Diagnostics,
+} from "./maintenance";
+import type { CredentialStatus } from "../shared/maintenance";
 import type { DesktopCommand, DesktopState } from "../shared/desktop";
 import {
   PEDIGREE_COLLECTIONS,
@@ -74,6 +88,7 @@ import { exportPmisFiles } from "../shared/pmis";
 import { PLANNER_IMPORTER } from "./planner-importer";
 import { citationIntegrity } from "../shared/report-pedigree";
 import { buildPowerBiFiles } from "./powerbi-export";
+import { buildPortableArchive } from "./archive-worker";
 
 import {
   MAX_ARCHIVE_BYTES,
@@ -122,6 +137,141 @@ let research: ResearchService;
 let searchKey: string | undefined;
 let desktop: DesktopStore;
 const windowSavers = new Map<BrowserWindow, () => void>();
+const diagnostics = new Diagnostics();
+const maintenanceFlushes = new Map<
+  string,
+  { resolve: () => void; reject: (e: Error) => void }
+>();
+let maintenanceBusy = false;
+function backupDirectory() {
+  return join(app.getPath("userData"), "backups");
+}
+async function flushForMaintenance() {
+  if (!collector || collector.isDestroyed()) return;
+  const requestId = randomUUID();
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      maintenanceFlushes.delete(requestId);
+      reject(
+        new Error(
+          "The editor did not confirm that changes were saved. Try again; no backup or restoration was started.",
+        ),
+      );
+    }, 15_000);
+    maintenanceFlushes.set(requestId, {
+      resolve: () => {
+        clearTimeout(timer);
+        maintenanceFlushes.delete(requestId);
+        resolve();
+      },
+      reject: (e) => {
+        clearTimeout(timer);
+        maintenanceFlushes.delete(requestId);
+        reject(e);
+      },
+    });
+    collector!.webContents.send("acadia:flush-for-maintenance", requestId);
+  });
+}
+async function credentialStatus(): Promise<CredentialStatus> {
+  const stored = (await readJSON(join(storageRoot, "settings.json")).catch(
+    () => undefined,
+  )) as { apiKeyEncrypted?: string } | undefined;
+  const searched = (await readJSON(
+    join(storageRoot, "search-settings.json"),
+  ).catch(() => undefined)) as { encrypted?: string } | undefined;
+  return {
+    analysis: settings.apiKey
+      ? stored?.apiKeyEncrypted && canEncryptSecrets()
+        ? "secure"
+        : "session"
+      : "absent",
+    search: searchKey
+      ? searched?.encrypted && canEncryptSecrets()
+        ? "secure"
+        : "session"
+      : "absent",
+    secureStorageAvailable: canEncryptSecrets(),
+  };
+}
+async function chooseAndRestoreBackup(): Promise<boolean> {
+  const result = await dialog.showOpenDialog({
+    title: "Choose an Acadia backup folder",
+    defaultPath: backupDirectory(),
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || !result.filePaths[0]) return false;
+  const backup = result.filePaths[0];
+  await validateWorkspaceBackup(backup);
+  const confirmation = await dialog.showMessageBox({
+    type: "warning",
+    title: "Restore research library",
+    message: "Restore this checked backup and restart Acadia?",
+    detail:
+      "The current workspace will be retained in a separate preserved folder. This replaces the active library with the selected backup. Saved credentials stay on this computer.",
+    buttons: ["Cancel", "Restore and restart"],
+    defaultId: 0,
+    cancelId: 0,
+  });
+  if (confirmation.response !== 1) return false;
+  if (collector) await flushForMaintenance();
+  maintenanceBusy = true;
+  try {
+    await mutationQueue;
+    await research?.shutdown();
+    await ingestion?.shutdown();
+    store?.close();
+    await restoreWorkspaceBackup(storageRoot, backup);
+  } catch (error) {
+    diagnostics.record("restore-backup", error);
+    // Workers or SQLite may already be closed. Never return to an apparently
+    // usable editor in this state; the next launch opens recovery if needed.
+    const action = await dialog.showMessageBox({
+      type: "error",
+      title: "Restoration stopped safely",
+      message: "The backup could not be restored. Acadia must close.",
+      detail: `Your existing library was retained in the workspace or its preserved folder. Inspect these files before retrying.\n\n${storageRoot}\n\n${error instanceof Error ? error.message : "Restoration failed."}`,
+      buttons: ["Close Acadia", "Show workspace location and close"],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (action.response === 1) shell.showItemInFolder(storageRoot);
+    app.exit(1);
+    return false;
+  }
+  app.relaunch();
+  app.exit(0);
+  return true;
+}
+async function startupRecovery(error: unknown) {
+  diagnostics.record("startup", error);
+  const action = await dialog.showMessageBox({
+    type: "error",
+    title: "Acadia recovery",
+    message: "The research library could not open.",
+    detail:
+      "Your workspace has been retained. Restore a checked backup, inspect the workspace folder, or quit. No research is sent anywhere.",
+    buttons: ["Restore backup…", "Open workspace folder", "Quit"],
+    defaultId: 0,
+    cancelId: 2,
+  });
+  if (action.response === 0) {
+    try {
+      if (await chooseAndRestoreBackup()) return;
+    } catch (e) {
+      await dialog.showMessageBox({
+        type: "error",
+        message: "Backup restoration did not complete",
+        detail:
+          e instanceof Error ? e.message : "Your workspace was preserved.",
+      });
+    }
+  } else if (action.response === 1)
+    await shell.openPath(
+      storageRoot || join(app.getPath("userData"), "workspace"),
+    );
+  app.exit(1);
+}
 
 function assertProjectTransitionAllowed(): void {
   if (generating)
@@ -439,7 +589,7 @@ function audiencePassage(passageId: string): Passage {
 }
 
 function startPendingExtractions(project: Project) {
-  const state = store.state(project.id);
+  const state = store.state(project.id, { lightweight: true });
   for (const source of state.sources) {
     const version = state.versions.find(
       (v) => v.id === source.currentVersionId,
@@ -481,7 +631,10 @@ const OUTPUT_KINDS: OutputKind[] = [
 ];
 
 function queued<T>(operation: () => Promise<T>): Promise<T> {
-  const next = mutationQueue.then(operation);
+  const next = mutationQueue.then(() => {
+    assertWorkspaceAvailable();
+    return operation();
+  });
   mutationQueue = next.catch(() => undefined);
   return next;
 }
@@ -544,14 +697,31 @@ function handle(
 ): void {
   ipcMain.handle(`acadia:${channel}`, async (event, ...args) => {
     assertSender(event, collectorOnly);
-    return callback(event, ...args);
+    try {
+      assertWorkspaceAvailable();
+      return await callback(event, ...args);
+    } catch (error) {
+      diagnostics.record(channel, error);
+      throw error;
+    }
   });
+}
+
+function assertWorkspaceAvailable(): void {
+  if (maintenanceBusy)
+    throw new Error(
+      "Workspace recovery is in progress. No new requests can run until Acadia restarts.",
+    );
 }
 
 async function persistProject(
   project: Project,
   projectPath: string | null | undefined = currentProjectPath,
 ): Promise<void> {
+  if (maintenanceBusy)
+    throw new Error(
+      "Workspace recovery is in progress. No new changes can be saved until Acadia restarts.",
+    );
   store.saveProject(project);
   store.activeProjectId = project.id;
   currentProject = store.getProject(project.id)!;
@@ -780,6 +950,21 @@ async function initializeStorage(): Promise<void> {
       );
       if (contents) await atomicWrite(join(backup, file), contents);
     }
+  }
+  if (databaseExists) {
+    const prior = new DatabaseSync(join(storageRoot, "research.sqlite"), {
+      readOnly: true,
+    });
+    let version: number;
+    try {
+      version = Number(
+        prior.prepare("PRAGMA user_version").get()?.user_version,
+      );
+    } finally {
+      prior.close();
+    }
+    if (version < 5)
+      await createWorkspaceBackup(storageRoot, backupDirectory());
   }
   store = new ResearchStore(storageRoot);
   const existingProject = store.activeProjectId
@@ -1063,7 +1248,7 @@ async function openArchive(path: string): Promise<WorkspaceState> {
     archivedResearch?.schemaVersion !== project.schemaVersion
   )
     throw new Error(
-      "The project and research archive versions must match; version 4 requires the updated Acadia research board.",
+      "The project and research archive versions must match; version 5 requires Acadia 1.0 or its release candidate.",
     );
   const manifest = JSON.parse(
     manifestEntry.getData().toString("utf8"),
@@ -1169,49 +1354,15 @@ async function openArchive(path: string): Promise<WorkspaceState> {
 }
 
 async function portableArchive(project: Project): Promise<Buffer> {
-  const zip = new AdmZip();
-  const manifest: AssetRecord[] = [];
-  const records = store.exportResearch(project.id);
-  let total = 0;
-  for (const id of new Set(
-    [
-      ...project.cards.map((card) => card.assetId),
-      ...records.sources.map((source) => source.assetId),
-      ...records.versions.map((version) => version.assetId),
-    ].filter((id): id is string => Boolean(id)),
-  )) {
-    const asset = assets[safeAssetId(id)];
-    if (!asset)
-      throw new Error(
-        "An attachment is missing. Reimport it before exporting or switching projects.",
-      );
-    total += asset.size;
-    if (total > MAX_ARCHIVE_BYTES - 50 * 1024 * 1024)
-      throw new Error(
-        "This project exceeds the 1 GB portable-project limit. Split large media into separate projects.",
-      );
-    const contents = await readFile(
-      join(storageRoot, "assets", asset.storedName),
-    );
-    zip.addFile(`assets/${id}`, contents);
-    manifest.push(asset);
-  }
-  zip.addFile("research.json", Buffer.from(JSON.stringify(records)));
-  zip.addFile(
-    "project.json",
-    Buffer.from(JSON.stringify({ ...project, schemaVersion: 4 }, null, 2)),
-  );
-  zip.addFile("assets.json", Buffer.from(JSON.stringify(manifest, null, 2)));
-  return zip.toBuffer();
+  return buildPortableArchive({
+    root: storageRoot,
+    databasePath: join(storageRoot, "research.sqlite"),
+    projectJSON: JSON.stringify({ ...project, schemaVersion: 5 }),
+    assets: Object.values(assets),
+  });
 }
 
 async function createRecovery(): Promise<void> {
-  if (
-    !currentProject.cards.length &&
-    !currentProject.outputs.length &&
-    !currentProject.question
-  )
-    return;
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const path = join(
     storageRoot,
@@ -1237,6 +1388,104 @@ function validateOutput(value: unknown): ResearchOutput {
 }
 
 function registerIPC(): void {
+  handle(
+    "maintenance-ready",
+    (_event, key, failure) => {
+      const pending = maintenanceFlushes.get(key);
+      if (pending) {
+        if (failure)
+          pending.reject(
+            new Error(
+              "The latest editor changes could not be saved. No restoration was started.",
+            ),
+          );
+        else pending.resolve();
+      }
+    },
+    true,
+  );
+  handle("credential-status", () => credentialStatus(), true);
+  handle(
+    "remove-credential",
+    async (_event, kind) => {
+      if (kind === "analysis")
+        await saveSettings({ ...settings, apiKey: undefined });
+      else if (kind === "search") {
+        await atomicWrite(join(storageRoot, "search-settings.json"), "{}");
+        searchKey = undefined;
+      } else throw new Error("Choose the analysis or search credential.");
+      return credentialStatus();
+    },
+    true,
+  );
+  handle(
+    "test-ai-generation",
+    (_event, input) => testAIGeneration(validateSettings(input)),
+    true,
+  );
+  handle("list-backups", () => listWorkspaceBackups(backupDirectory()), true);
+  handle(
+    "create-backup",
+    async () => {
+      const choice = await dialog.showOpenDialog({
+        title: "Choose a backup destination outside the workspace",
+        defaultPath: backupDirectory(),
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (choice.canceled || !choice.filePaths[0]) return null;
+      await flushForMaintenance();
+      return queued(() =>
+        createWorkspaceBackup(storageRoot, choice.filePaths[0]),
+      );
+    },
+    true,
+  );
+  handle("restore-backup", () => chooseAndRestoreBackup(), true);
+  handle("diagnostic-report", () => diagnostics.report(app.getVersion()), true);
+  handle(
+    "export-diagnostics",
+    async () => {
+      const choice = await dialog.showSaveDialog({
+        title: "Save redacted support diagnostics",
+        defaultPath: "Acadia-diagnostics.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (choice.canceled || !choice.filePath) return null;
+      await atomicWrite(
+        choice.filePath,
+        JSON.stringify(diagnostics.report(app.getVersion()), null, 2),
+      );
+      return choice.filePath;
+    },
+    true,
+  );
+  handle(
+    "check-for-updates",
+    async () => {
+      const response = await fetch(
+        "https://api.github.com/repos/byrneDev/Acadia/releases/latest",
+        {
+          headers: { Accept: "application/vnd.github+json" },
+          signal: AbortSignal.timeout(15_000),
+          redirect: "error",
+        },
+      );
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(
+          `GitHub update check failed (HTTP ${response.status}). Try again later; nothing was installed.`,
+        );
+      }
+      const { readBoundedJSON } = await import("./analysis");
+      return releaseUpdate(
+        app.getVersion(),
+        await readBoundedJSON(response),
+        process.platform,
+        process.arch,
+      );
+    },
+    true,
+  );
   handle("desktop-state", () => desktopState());
   handle(
     "save-desktop-preferences",
@@ -1301,6 +1550,146 @@ function registerIPC(): void {
     researchChanged();
     return value;
   };
+  handle(
+    "research-drafts",
+    (_event, projectId) => {
+      if (id(projectId) !== currentProject.id)
+        throw new Error("Draft belongs to another investigation.");
+      return store.researchDrafts(projectId);
+    },
+    true,
+  );
+  handle(
+    "save-research-draft",
+    (_event, input) =>
+      queued(async () => {
+        if (!input || input.projectId !== currentProject.id)
+          throw new Error(
+            "Draft belongs to another investigation. Reopen that investigation to recover it.",
+          );
+        return store.saveResearchDraft(input);
+      }),
+    true,
+  );
+  handle(
+    "delete-research-draft",
+    (_event, projectId, key, revision) =>
+      queued(async () => {
+        if (id(projectId) !== currentProject.id)
+          throw new Error("Draft belongs to another investigation.");
+        store.deleteResearchDraft(projectId, key, revision);
+      }),
+    true,
+  );
+  handle(
+    "list-sources-page",
+    (_event, query, page) =>
+      store.listSourcesPage(
+        currentProject.id,
+        query === undefined ? "" : text(query, 10000),
+        page,
+      ),
+    true,
+  );
+  handle(
+    "search-sources-page",
+    (_event, query, page) =>
+      store.searchSourcesPage(currentProject.id, text(query, 10000), page),
+    true,
+  );
+  handle(
+    "source-passages-page",
+    (_event, sourceId, versionId, query, page) => {
+      ownSource(sourceId);
+      return store.getSourcePassagesPage(
+        currentProject.id,
+        id(sourceId),
+        versionId === undefined ? undefined : id(versionId),
+        query === undefined ? "" : text(query, 10000),
+        page,
+      );
+    },
+    true,
+  );
+  handle(
+    "list-analysis-runs-page",
+    (_event, page) => store.listAnalysisRunsPage(currentProject.id, page),
+    true,
+  );
+  handle(
+    "get-analysis-run",
+    (_event, value) => store.getAnalysisRun(currentProject.id, id(value)),
+    true,
+  );
+  handle(
+    "create-passage-citation",
+    (_event, value) => {
+      const passage = ownPassage(value),
+        detail = store.getSource(passage.sourceId, passage.versionId);
+      const version = detail.versions.find((v) => v.id === passage.versionId);
+      if (!version || !passage.text.trim())
+        throw new Error("This historical passage is unavailable.");
+      return {
+        id: randomUUID(),
+        label: "",
+        sourceId: passage.sourceId,
+        versionId: passage.versionId,
+        passageId: passage.id,
+        sourceTitle: version.title,
+        locator: passage.locator,
+        quote: passage.text,
+        url: version.url,
+        acquiredAt: version.acquiredAt,
+        author: version.author,
+        publisher: version.publisher,
+        publishedAt: version.publishedAt,
+        doi: version.doi,
+        verified: passage.method !== "legacy",
+        ...(passage.method === "legacy"
+          ? { legacyCardId: detail.source.cardId ?? detail.source.id }
+          : {}),
+      } satisfies Citation;
+    },
+    true,
+  );
+  handle(
+    "source-page-preview",
+    async (_event, sourceId, versionId, page) => {
+      ownSource(sourceId);
+      if (!Number.isSafeInteger(page) || page < 1)
+        throw new Error("Choose a valid PDF page.");
+      const detail = store.getSource(id(sourceId), id(versionId)),
+        version = detail.versions.find((v) => v.id === versionId);
+      const asset = version?.assetId ? assets[version.assetId] : undefined;
+      if (!asset || asset.mimeType !== "application/pdf")
+        throw new Error("This historical source has no original PDF.");
+      const { CanvasFactory, getData } = await import("pdf-parse/worker");
+      const { PDFParse } = await import("pdf-parse");
+      PDFParse.setWorker(getData());
+      const parser = new PDFParse({
+        data: await readFile(join(storageRoot, "assets", asset.storedName)),
+        CanvasFactory,
+      });
+      try {
+        const info = await parser.getInfo();
+        if (page > info.total) throw new Error("Page is outside this PDF.");
+        const screenshot = (
+          await parser.getScreenshot({
+            partial: [page],
+            desiredWidth: 1200,
+            imageDataUrl: true,
+            imageBuffer: false,
+          })
+        ).pages[0];
+        if (!screenshot?.dataUrl)
+          throw new Error("The PDF page could not be rendered.");
+        return { dataUrl: screenshot.dataUrl, page, totalPages: info.total };
+      } finally {
+        await parser.destroy();
+      }
+    },
+    true,
+  );
   handle("pedigree-state", () => store.pedigreeState(currentProject.id), true);
   const pedigreeWriters = {
     brief: (v: any) => store.saveBrief(v),
@@ -1339,7 +1728,13 @@ function registerIPC(): void {
   );
   handle(
     "create-pedigree-snapshot",
-    () => store.createPedigreeSnapshot(currentProject.id),
+    () =>
+      queued(async () => {
+        const snapshot = await store.createPedigreeSnapshotAsync(
+          currentProject.id,
+        );
+        return store.getPedigreeSnapshot(snapshot.id);
+      }),
     true,
   );
   handle(
@@ -1432,7 +1827,7 @@ function registerIPC(): void {
   handle("research-state", (event) =>
     BrowserWindow.fromWebContents(event.sender) === releaser
       ? audienceResearchState()
-      : store.state(currentProject.id),
+      : store.state(currentProject.id, { lightweight: true }),
   );
   handle("get-source", (event, value, version) => {
     const sourceId = id(value),
@@ -1529,7 +1924,9 @@ function registerIPC(): void {
     "delete-claim",
     (_event, value) => {
       if (
-        !store.state(currentProject.id).claims.some((c) => c.id === id(value))
+        !store
+          .state(currentProject.id, { lightweight: true })
+          .claims.some((c) => c.id === id(value))
       )
         throw new Error("Claim not found.");
       return changeResearch(() => store.deleteClaim(id(value)));
@@ -1573,7 +1970,11 @@ function registerIPC(): void {
   handle(
     "delete-task",
     (_event, value) => {
-      if (!store.state(currentProject.id).tasks.some((t) => t.id === id(value)))
+      if (
+        !store
+          .state(currentProject.id, { lightweight: true })
+          .tasks.some((t) => t.id === id(value))
+      )
         throw new Error("Task not found.");
       return changeResearch(() => store.deleteTask(id(value)));
     },
@@ -2061,13 +2462,7 @@ else {
         if (!collector) collector = createWindow();
       });
     })
-    .catch((error) => {
-      dialog.showErrorBox(
-        "Acadia could not start",
-        error instanceof Error ? error.message : String(error),
-      );
-      app.quit();
-    });
+    .catch(startupRecovery);
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
   });
@@ -2081,8 +2476,11 @@ else {
     }
     closing = true;
     for (const save of windowSavers.values()) save();
-    void Promise.allSettled([mutationQueue, desktop?.flush()]).finally(() =>
-      app.quit(),
-    );
+    void Promise.allSettled([
+      mutationQueue,
+      desktop?.flush(),
+      research?.shutdown(),
+      ingestion?.shutdown(),
+    ]).finally(() => app.quit());
   });
 }

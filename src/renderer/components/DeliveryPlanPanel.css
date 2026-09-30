@@ -51,3 +51,38 @@
 .delivery-plan-fields .field {
   margin-top: 12px;
 }
+.delivery-fields-row select[multiple] {
+  min-height: 110px;
+}
+.delivery-verification {
+  border: 1px solid var(--line);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 12px 0;
+}
+.delivery-verification ul {
+  max-height: 240px;
+  overflow: auto;
+  padding-left: 20px;
+}
+.delivery-verification li {
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+.delivery-verification li p {
+  white-space: pre-wrap;
+}
+.delivery-mapping {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.delivery-mapping th,
+.delivery-mapping td {
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}

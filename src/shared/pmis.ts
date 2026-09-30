@@ -1,7 +1,17 @@
-import type { ReportDocument } from "./research";
+import type { Passage, ReportDocument } from "./research";
 import type { ProjectPlanContext, ResearchOutput } from "./types";
+import type { PedigreeRevision, PedigreeState } from "./pedigree";
 import { reportDocument } from "./report";
 
+export interface DeliveryRecordRef {
+  id: string;
+  revision: number;
+}
+export interface VerificationEvidenceRef {
+  passageId: string;
+  sourceId: string;
+  versionId: string;
+}
 export interface WorkPackage {
   id: string;
   title: string;
@@ -13,6 +23,12 @@ export interface WorkPackage {
   status: "planned" | "doing" | "blocked" | "complete";
   owner: string;
   dueDate: string;
+  gapRefs?: DeliveryRecordRef[];
+  findingRefs?: DeliveryRecordRef[];
+  requirement?: string;
+  learningObjective?: string;
+  acceptanceTest?: string;
+  verificationEvidence?: VerificationEvidenceRef[];
 }
 export interface DeliveryPlan {
   schemaVersion: 1;
@@ -21,6 +37,8 @@ export interface DeliveryPlan {
   sourceOutputId: string;
   sourceRevisionId?: string;
   gap: string;
+  gapRefs?: DeliveryRecordRef[];
+  findingRefs?: DeliveryRecordRef[];
   deliverableType: ProjectPlanContext["deliverableType"];
   updatedAt: string;
   reviewStatus: "draft" | "reviewed";
@@ -42,6 +60,104 @@ const id = (v: unknown) => {
     throw new Error("Invalid work package identifier.");
   return value;
 };
+export function validateDeliveryRecordRefs(
+  input: unknown,
+): DeliveryRecordRef[] {
+  if (!Array.isArray(input) || input.length > 1000)
+    throw new Error("Invalid delivery research references.");
+  const seen = new Set<string>();
+  return input.map((entry) => {
+    const value = object(entry),
+      identifier = id(value.id);
+    if (
+      !Number.isSafeInteger(value.revision) ||
+      Number(value.revision) < 1 ||
+      seen.has(identifier)
+    )
+      throw new Error(
+        "Each delivery reference needs a unique record and a saved revision.",
+      );
+    seen.add(identifier);
+    return { id: identifier, revision: Number(value.revision) };
+  });
+}
+export function validateVerificationEvidenceRefs(
+  input: unknown,
+): VerificationEvidenceRef[] {
+  if (!Array.isArray(input) || input.length > 1000)
+    throw new Error("Invalid verification evidence references.");
+  const seen = new Set<string>();
+  return input.map((entry) => {
+    const value = object(entry),
+      passageId = id(value.passageId);
+    if (seen.has(passageId)) throw new Error("Duplicate verification passage.");
+    seen.add(passageId);
+    return {
+      passageId,
+      sourceId: id(value.sourceId),
+      versionId: id(value.versionId),
+    };
+  });
+}
+const recordFields = (value: Record<string, unknown>) => ({
+  ...(value.gapRefs === undefined
+    ? {}
+    : { gapRefs: validateDeliveryRecordRefs(value.gapRefs) }),
+  ...(value.findingRefs === undefined
+    ? {}
+    : { findingRefs: validateDeliveryRecordRefs(value.findingRefs) }),
+});
+/** Run against authoritative project-scoped records; never infer a gap resolution from task status. */
+export function validateDeliveryPlanReferences(
+  plan: Pick<DeliveryPlan, "gapRefs" | "findingRefs" | "tasks">,
+  context: {
+    projectId: string;
+    pedigree: PedigreeState;
+    revisions: PedigreeRevision[];
+    passages: Passage[];
+  },
+): void {
+  const records = [plan, ...plan.tasks];
+  for (const entry of records)
+    for (const [field, kind, collection] of [
+      ["gapRefs", "gap", context.pedigree.gaps],
+      ["findingRefs", "finding", context.pedigree.findings],
+    ] as const)
+      for (const ref of entry[field] || []) {
+        const exists =
+          collection.some(
+            (record) =>
+              record.projectId === context.projectId &&
+              record.id === ref.id &&
+              record.revision === ref.revision,
+          ) ||
+          context.revisions.some(
+            (revision) =>
+              revision.projectId === context.projectId &&
+              revision.entityId === ref.id &&
+              revision.kind === kind &&
+              revision.revision === ref.revision,
+          );
+        if (!exists)
+          throw new Error(
+            "Delivery reference does not identify a saved research revision in this investigation.",
+          );
+      }
+  for (const task of plan.tasks)
+    for (const ref of task.verificationEvidence || []) {
+      if (
+        !context.passages.some(
+          (passage) =>
+            passage.id === ref.passageId &&
+            passage.sourceId === ref.sourceId &&
+            passage.versionId === ref.versionId,
+        )
+      )
+        throw new Error(
+          "Verification evidence does not identify an exact saved passage in this investigation.",
+        );
+    }
+}
 export function validateDeliveryPlan(input: unknown): DeliveryPlan {
   const v = object(input);
   if (v.schemaVersion !== 1 || !Array.isArray(v.tasks) || v.tasks.length > 1000)
@@ -80,6 +196,23 @@ export function validateDeliveryPlan(input: unknown): DeliveryPlan {
       status: t.status as WorkPackage["status"],
       owner: text(t.owner, 255),
       dueDate,
+      ...recordFields(t),
+      ...(t.requirement === undefined
+        ? {}
+        : { requirement: text(t.requirement) }),
+      ...(t.learningObjective === undefined
+        ? {}
+        : { learningObjective: text(t.learningObjective) }),
+      ...(t.acceptanceTest === undefined
+        ? {}
+        : { acceptanceTest: text(t.acceptanceTest) }),
+      ...(t.verificationEvidence === undefined
+        ? {}
+        : {
+            verificationEvidence: validateVerificationEvidenceRefs(
+              t.verificationEvidence,
+            ),
+          }),
     };
   });
   const map = new Map(tasks.map((t) => [t.id, t]));
@@ -113,6 +246,7 @@ export function validateDeliveryPlan(input: unknown): DeliveryPlan {
       ? {}
       : { sourceRevisionId: id(v.sourceRevisionId) }),
     gap: text(v.gap),
+    ...recordFields(v),
     deliverableType: v.deliverableType as DeliveryPlan["deliverableType"],
     updatedAt,
     reviewStatus: v.reviewStatus as DeliveryPlan["reviewStatus"],
@@ -131,6 +265,12 @@ export function newWorkPackage(): WorkPackage {
     status: "planned",
     owner: "",
     dueDate: "",
+    gapRefs: [],
+    findingRefs: [],
+    requirement: "",
+    learningObjective: "",
+    acceptanceTest: "",
+    verificationEvidence: [],
   };
 }
 const nodeText = (node: ReportDocument): string =>
@@ -186,6 +326,8 @@ export function draftDeliveryPlan(output: ResearchOutput): DeliveryPlan {
     title: output.title,
     sourceOutputId: output.id,
     gap: output.plan?.gap || "",
+    gapRefs: output.plan?.gapRefs || [],
+    findingRefs: output.plan?.findingRefs || [],
     deliverableType: output.plan?.deliverableType || "other",
     updatedAt: new Date().toISOString(),
     reviewStatus: "draft",
@@ -209,6 +351,12 @@ export const taskDescription = (plan: DeliveryPlan, task: WorkPackage) =>
   [
     task.description,
     `Acceptance criteria: ${task.acceptanceCriteria || "Unassessed"}`,
+    `Software requirement: ${task.requirement || "Unassessed"}`,
+    `Learning objective: ${task.learningObjective || "Unassessed"}`,
+    `Acceptance test / assessment: ${task.acceptanceTest || "Unassessed"}`,
+    `Linked gap revisions: ${formatDeliveryRefs([...(plan.gapRefs || []), ...(task.gapRefs || [])])}`,
+    `Linked finding revisions: ${formatDeliveryRefs([...(plan.findingRefs || []), ...(task.findingRefs || [])])}`,
+    `Verification evidence: ${formatVerificationRefs(task.verificationEvidence || [])}`,
     `Dependencies: ${task.dependencyIds.join(", ") || "None linked"}${task.dependencyNotes ? `; ${task.dependencyNotes}` : ""}`,
     `Owner (not assigned): ${task.owner || "Unassigned"}`,
     `Research gap: ${plan.gap || "Not specified"}`,
@@ -217,10 +365,76 @@ export const taskDescription = (plan: DeliveryPlan, task: WorkPackage) =>
   ]
     .filter(Boolean)
     .join("\n\n");
+export const formatDeliveryRefs = (refs: DeliveryRecordRef[]) =>
+  [...new Set(refs.map((ref) => `${ref.id} (revision ${ref.revision})`))].join(
+    "; ",
+  ) || "None linked";
+export const formatVerificationRefs = (refs: VerificationEvidenceRef[]) =>
+  refs
+    .map(
+      (ref) =>
+        `Passage ${ref.passageId}; source ${ref.sourceId}; version ${ref.versionId}`,
+    )
+    .join(" | ") || "None linked";
+export function pmisMappingPreview(plan: DeliveryPlan) {
+  return {
+    format: "acadia-pmis-mapping-v1",
+    planId: plan.id,
+    workPackageCount: plan.tasks.length,
+    unassignedOwners: plan.tasks.filter((task) => !task.owner.trim()).length,
+    unscheduledTasks: plan.tasks.filter((task) => !task.dueDate).length,
+    dependencies: plan.tasks.reduce(
+      (count, task) => count + task.dependencyIds.length,
+      0,
+    ),
+    withoutVerificationEvidence: plan.tasks.filter(
+      (task) => !task.verificationEvidence?.length,
+    ).length,
+    destinations: [
+      {
+        name: "Monday",
+        identity:
+          "Map Acadia ID to a stable text column; use matching when supported.",
+        assignments: "Owner is text until mapped to a member.",
+        dependencies:
+          "Dependency IDs are text; configure native dependency columns.",
+        repeatImport:
+          "Inspect existing items and mapping before repeating; automatic upsert is not provided.",
+      },
+      {
+        name: "Jira",
+        identity:
+          "Acadia Work Package ID is a mapping field; retain created issue keys in an import receipt.",
+        assignments:
+          "Owner is retained in Description; map to an allowed account separately.",
+        dependencies:
+          "Dependencies and acceptance criteria are in Description; native links need mapping.",
+        repeatImport:
+          "A repeated create import may duplicate issues. Use the receipt to reconcile before repeating.",
+      },
+      {
+        name: "Planner",
+        identity:
+          "The explicit PowerShell importer uses stable external IDs and a local receipt for one account/plan.",
+        assignments:
+          "Owners remain text; assign members in the target basic plan.",
+        dependencies:
+          "Dependencies are descriptive, not scheduling constraints.",
+        repeatImport:
+          "Resume with the same receipt after inspecting interrupted creates. Changed existing tasks are not synchronized.",
+      },
+    ],
+    limitations: [
+      "Exports do not contact a PMIS or resolve research gaps.",
+      "Local format tests do not establish a successful live tenant import.",
+      "Only entered dates and owners are exported; no schedule or identity is inferred.",
+    ],
+  };
+}
 export function deliveryPlanMarkdown(plan: DeliveryPlan): string {
   const cell = (text: string) =>
     text.replace(/[\\|`*_[\]<>]/g, (c) => `\\${c}`).replace(/\n/g, " ");
-  return `## Delivery work package register\n\nReview: ${plan.reviewStatus}. Source report: ${plan.sourceOutputId}. Research gap: ${cell(plan.gap || "Unassessed")}.\n\n| Work package | Deliverable and acceptance | Dependencies | Status / owner / due |\n| --- | --- | --- | --- |\n${plan.tasks.map((t) => `| ${cell(t.title)} (${t.id}) | ${cell(t.description)}. Acceptance: ${cell(t.acceptanceCriteria || "Unassessed")} | ${cell(t.dependencyIds.map((id) => plan.tasks.find((p) => p.id === id)?.title || id).join("; "))}${t.dependencyNotes ? `; ${cell(t.dependencyNotes)}` : ""} | ${t.status}; ${cell(t.owner || "Unassigned")}; ${t.dueDate || "Unscheduled"} |`).join("\n")}\n\nNative account assignments and scheduling constraints must be configured in the destination PMIS. Proposed work is not evidence that the deliverable will close the research gap.\n`;
+  return `## Delivery work package register\n\nReview: ${plan.reviewStatus}. Source report: ${plan.sourceOutputId}. Research gap: ${cell(plan.gap || "Unassessed")}.\n\nGap revisions: ${cell(formatDeliveryRefs(plan.gapRefs || []))}. Finding revisions: ${cell(formatDeliveryRefs(plan.findingRefs || []))}.\n\n| Work package | Deliverable and acceptance | Dependencies | Status / owner / due |\n| --- | --- | --- | --- |\n${plan.tasks.map((t) => `| ${cell(t.title)} (${t.id}) | ${cell(t.description)}. Acceptance: ${cell(t.acceptanceCriteria || "Unassessed")} | ${cell(t.dependencyIds.map((id) => plan.tasks.find((p) => p.id === id)?.title || id).join("; "))}${t.dependencyNotes ? `; ${cell(t.dependencyNotes)}` : ""} | ${t.status}; ${cell(t.owner || "Unassigned")}; ${t.dueDate || "Unscheduled"} |`).join("\n")}\n\n### Requirements and verification\n\n| Work package | Requirement / learning objective | Test / assessment | Historical basis and evidence |\n| --- | --- | --- | --- |\n${plan.tasks.map((t) => `| ${cell(t.title)} | ${cell([t.requirement && `Requirement: ${t.requirement}`, t.learningObjective && `Learning objective: ${t.learningObjective}`].filter(Boolean).join("; ") || "Unassessed")} | ${cell(t.acceptanceTest || "Unassessed")} | Gaps: ${cell(formatDeliveryRefs(t.gapRefs || []))}. Findings: ${cell(formatDeliveryRefs(t.findingRefs || []))}. Evidence: ${cell(formatVerificationRefs(t.verificationEvidence || []))} |`).join("\n")}\n\nNative account assignments and scheduling constraints must be configured in the destination PMIS. Completing a work package does not resolve a research gap; review its verification evidence and update the gap deliberately. Proposed work is not evidence that the deliverable will close the research gap.\n`;
 }
 export function exportPmisFiles(input: DeliveryPlan): Record<string, string> {
   const plan = validateDeliveryPlan(input);
@@ -241,6 +455,12 @@ export function exportPmisFiles(input: DeliveryPlan): Record<string, string> {
       "Research Gap",
       "Source Report",
       "Plan Review",
+      "Requirement",
+      "Learning Objective",
+      "Acceptance Test",
+      "Gap Revisions",
+      "Finding Revisions",
+      "Verification Evidence",
     ],
     ...plan.tasks.map((t) => [
       t.id,
@@ -256,6 +476,15 @@ export function exportPmisFiles(input: DeliveryPlan): Record<string, string> {
       plan.gap,
       plan.sourceOutputId,
       plan.reviewStatus,
+      t.requirement || "",
+      t.learningObjective || "",
+      t.acceptanceTest || "",
+      formatDeliveryRefs([...(plan.gapRefs || []), ...(t.gapRefs || [])]),
+      formatDeliveryRefs([
+        ...(plan.findingRefs || []),
+        ...(t.findingRefs || []),
+      ]),
+      formatVerificationRefs(t.verificationEvidence || []),
     ]),
   ];
   const monday = [
@@ -285,13 +514,21 @@ export function exportPmisFiles(input: DeliveryPlan): Record<string, string> {
   // Portable baseline importer fields. Relations/owners are retained in description;
   // do not manufacture Jira issue keys, account IDs or custom-field mappings.
   const jira = [
-    ["Summary", "Issue Type", "Description", "Labels", "Due Date"],
+    [
+      "Summary",
+      "Issue Type",
+      "Description",
+      "Labels",
+      "Due Date",
+      "Acadia Work Package ID",
+    ],
     ...plan.tasks.map((t) => [
       t.title,
       "Task",
       taskDescription(plan, t),
       "acadia",
       t.dueDate,
+      t.id,
     ]),
   ];
   const planner = {
@@ -315,12 +552,28 @@ export function exportPmisFiles(input: DeliveryPlan): Record<string, string> {
     "jira.csv": csv(jira),
     "delivery-plan.json": JSON.stringify(plan, null, 2),
     "planner.json": JSON.stringify(planner, null, 2),
+    "import-mapping.json": JSON.stringify(pmisMappingPreview(plan), null, 2),
+    "IMPORT-RECEIPT-TEMPLATE.csv": csv([
+      [
+        "Acadia Work Package ID",
+        "Destination",
+        "Target Project or Plan",
+        "External Item ID",
+        "External URL",
+      ],
+      ...plan.tasks.map((task) => [task.id, "", "", "", ""]),
+    ]),
     "IMPORT-README.md": PMIS_GUIDE,
   };
 }
 export const PMIS_GUIDE = `# Acadia PMIS handoff
 
 Review work packages before import. Export creates local files only; it does not contact any PMIS. Dates and owners remain unassigned unless you entered them. Retain delivery-plan.json and the report for traceability. Credentials are not part of this bundle.
+
+## Mapping preview and repeated imports
+Read import-mapping.json before import: it lists identity mapping, assignments, dependencies, unassigned fields, and repeat-import limitations for each destination. Populate IMPORT-RECEIPT-TEMPLATE.csv with the external item IDs and destination project/plan after import. Stable Acadia IDs are data, not an automatic upsert guarantee. A repeated import can create duplicates; these exports do not synchronize subsequent edits or reconcile deleted tasks.
+
+Gap and finding references retain their saved revision numbers. Requirements, learning objectives, acceptance tests, and exact verification passage/source/version IDs survive CSV descriptions and JSON exports. A completed task or a linked passage does not resolve its research gap automatically; review the observation and update the gap manually in Acadia. Live Monday, Jira, and Planner tenant imports have not been validated by Acadia's local export tests.
 
 ## Monday
 Import monday.csv into a board using Import items. Map Name to the item name, Due Date to Date (YYYY-MM-DD), and the remaining fields to Text/Long Text or Status. Use Acadia ID as a matching key when offered to avoid duplicates. Dependencies and phase are preserved as text; configure native dependency columns and groups after import. Owner is text until mapped to a valid member. Do not assume native links or assignments were created.
