@@ -67,6 +67,8 @@ import {
   type PedigreeEntityKind,
 } from "../shared/pedigree";
 import type { ChallengeTarget } from "../shared/pedigree-analysis";
+import { validateItemInsightTarget } from "../shared/item-insight";
+import { validateBoardReference } from "../shared/board";
 import { validateProjectPlanContext } from "../shared/project";
 import { exportPmisFiles } from "../shared/pmis";
 import { PLANNER_IMPORTER } from "./planner-importer";
@@ -210,6 +212,9 @@ function trackWindow(window: BrowserWindow, kind: WindowKind): void {
   window.on("resize", schedule);
   window.on("maximize", schedule);
   window.on("unmaximize", schedule);
+  // A screen-sized first window may never emit move/resize. Save its actual
+  // initial placement after showing, including a restored maximized state.
+  window.once("show", schedule);
   window.on("close", save);
   window.on("focus", desktopChanged);
   window.on("focus", refreshDesktopMenu);
@@ -440,6 +445,7 @@ function startPendingExtractions(project: Project) {
       (v) => v.id === source.currentVersionId,
     );
     if (
+      !source.derived &&
       source.assetId &&
       version?.status === "queued" &&
       !extracting.has(source.id) &&
@@ -1046,13 +1052,18 @@ async function openArchive(path: string): Promise<WorkspaceState> {
     ? validateResearchArchive(
         JSON.parse(researchEntry.getData().toString("utf8")),
         project.id,
+        undefined,
+        project.cards,
       )
     : undefined;
   if (project.schemaVersion >= 2 && !archivedResearch)
     throw new Error("Portable projects require their research records.");
-  if (project.schemaVersion === 3 && archivedResearch?.schemaVersion !== 3)
+  if (
+    project.schemaVersion >= 3 &&
+    archivedResearch?.schemaVersion !== project.schemaVersion
+  )
     throw new Error(
-      "Version 3 projects require version 3 research records; use Acadia 0.4 or later.",
+      "The project and research archive versions must match; version 4 requires the updated Acadia research board.",
     );
   const manifest = JSON.parse(
     manifestEntry.getData().toString("utf8"),
@@ -1149,7 +1160,7 @@ async function openArchive(path: string): Promise<WorkspaceState> {
         discoveries: [],
         runs: [],
       },
-      { replace: true },
+      { replace: true, projectCards: project.cards },
     );
     store.saveProject(project);
   });
@@ -1188,7 +1199,7 @@ async function portableArchive(project: Project): Promise<Buffer> {
   zip.addFile("research.json", Buffer.from(JSON.stringify(records)));
   zip.addFile(
     "project.json",
-    Buffer.from(JSON.stringify({ ...project, schemaVersion: 3 }, null, 2)),
+    Buffer.from(JSON.stringify({ ...project, schemaVersion: 4 }, null, 2)),
   );
   zip.addFile("assets.json", Buffer.from(JSON.stringify(manifest, null, 2)));
   return zip.toBuffer();
@@ -1299,6 +1310,8 @@ function registerIPC(): void {
     assumption: (v: any) => store.saveAssumption(v),
     method: (v: any) => store.saveMethod(v),
     issue: (v: any) => store.saveReviewIssue(v),
+    gap: (v: any) => store.saveGap(v),
+    decision: (v: any) => store.saveDecision(v),
   };
   for (const kind of Object.keys(pedigreeWriters) as PedigreeEntityKind[])
     handle(
@@ -1352,6 +1365,55 @@ function registerIPC(): void {
   handle(
     "assist-method",
     (_event, value) => research.assistMethod(currentProject, id(value)),
+    true,
+  );
+  handle(
+    "summarize-item",
+    (_event, input: unknown) => {
+      const target = validateItemInsightTarget(input);
+      const projectId = currentProject.id;
+      return queued(async () => {
+        if (currentProject.id !== projectId)
+          throw new Error("Project changed before the item summary started.");
+        return research.summarizeItem(currentProject, target);
+      });
+    },
+    true,
+  );
+  handle(
+    "add-board-reference",
+    (_event, input: unknown) => {
+      const reference = validateBoardReference(input),
+        projectId = currentProject.id;
+      return queued(async () => {
+        if (currentProject.id !== projectId)
+          throw new Error("Project changed before the board item was placed.");
+        const result = store.addBoardReference(currentProject, reference);
+        await persistProject(result.project);
+        return { project: currentProject, cardId: result.cardId };
+      });
+    },
+    true,
+  );
+  handle(
+    "accept-item-insight",
+    (_event, input: unknown) => {
+      if (!input || typeof input !== "object" || Array.isArray(input))
+        throw new Error("Choose a completed item summary to review.");
+      const value = input as Record<string, unknown>;
+      const request = {
+        runId: id(value.runId),
+        notes: text(value.notes, 30_000),
+      };
+      const projectId = currentProject.id;
+      return queued(async () => {
+        if (currentProject.id !== projectId)
+          throw new Error("Project changed before the item review was saved.");
+        const claim = await research.acceptItemInsight(currentProject, request);
+        researchChanged();
+        return claim;
+      });
+    },
     true,
   );
   handle("list-projects", () => store.listProjects(), true);
@@ -1448,9 +1510,15 @@ function registerIPC(): void {
       text(candidate.limitations);
       if (!Array.isArray(candidate.links) || candidate.links.length > 10000)
         throw new Error("Invalid evidence links.");
+      const existing = store
+        .state(currentProject.id)
+        .claims.find((claim) => claim.id === candidate.id);
+      const historicalReviewedCard =
+        existing?.itemReview && existing.cardId === candidate.cardId;
       if (
         candidate.cardId &&
-        !currentProject.cards.some((c) => c.id === candidate.cardId)
+        !currentProject.cards.some((c) => c.id === candidate.cardId) &&
+        !historicalReviewedCard
       )
         throw new Error("Missing claim board item.");
       return changeResearch(() => store.saveClaim(candidate));

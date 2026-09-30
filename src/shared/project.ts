@@ -1,3 +1,4 @@
+import { validateBoardReference } from "./board";
 import type {
   CardKind,
   Connection,
@@ -39,6 +40,11 @@ const RELATIONS: Relation[] = [
   "contradicts",
   "derived from",
   "investigate",
+  "informs",
+  "identifies gap",
+  "addresses",
+  "depends on",
+  "produces",
 ];
 const SAFE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 const ASSET_ID =
@@ -47,7 +53,7 @@ const ASSET_ID =
 export function createBlankProject(): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     privacy: { mode: "local" },
     groups: [],
     views: [],
@@ -272,8 +278,13 @@ function optionalText(
 /** Validate and reconstruct an import. Unknown fields never enter trusted app state. */
 export function validateProject(value: unknown): Project {
   const p = object(value, "root");
-  if (p.schemaVersion !== 1 && p.schemaVersion !== 2 && p.schemaVersion !== 3)
-    fail("schemaVersion", "is not supported (expected 1, 2, or 3)");
+  if (
+    p.schemaVersion !== 1 &&
+    p.schemaVersion !== 2 &&
+    p.schemaVersion !== 3 &&
+    p.schemaVersion !== 4
+  )
+    fail("schemaVersion", "is not supported (expected 1, 2, 3, or 4)");
   let textSize = 0;
   const budget = (amount: number): void => {
     textSize += amount;
@@ -332,9 +343,25 @@ export function validateProject(value: unknown): Project {
           c.methodId === undefined
             ? undefined
             : id(c.methodId, `${path}.methodId`),
+        boardReference:
+          c.boardReference === undefined
+            ? undefined
+            : validateBoardReference(c.boardReference),
         createdAt: date(c.createdAt, `${path}.createdAt`),
         updatedAt: date(c.updatedAt, `${path}.updatedAt`),
       };
+      if (result.boardReference && p.schemaVersion !== 4)
+        fail(`${path}.boardReference`, "requires portable project version 4");
+      if (
+        result.boardReference &&
+        result.methodId &&
+        (result.boardReference.kind !== "method" ||
+          result.boardReference.id !== result.methodId)
+      )
+        fail(
+          `${path}.methodId`,
+          "does not match its authoritative board reference",
+        );
       budget(
         result.title.length +
           result.tags.reduce((n, tag) => n + tag.length, 0) +

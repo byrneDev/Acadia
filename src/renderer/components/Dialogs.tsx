@@ -1,4 +1,9 @@
-import type { ProjectPrivacy } from "../../shared/research";
+import type {
+  ProjectPrivacy,
+  ResearchClaim,
+  Citation,
+} from "../../shared/research";
+import { ReviewerNotes } from "./ReviewerNotes";
 import { useEffect, useLayoutEffect, useRef, useState, useId } from "react";
 import {
   X,
@@ -12,6 +17,7 @@ import {
   ShieldAlert,
   Rocket,
   Layers,
+  Sparkles,
 } from "lucide-react";
 import { METHOD_REGISTRY, type MethodKind } from "../../shared/pedigree";
 import "./CardDialog.css";
@@ -354,6 +360,12 @@ export function Inspector({
   onDelete,
   onSource,
   onMethod,
+  onReadSource,
+  onSummarize,
+  reviewerClaims = [],
+  reviewerSourceVersion,
+  onCitation,
+  onEvidence,
   onConnection,
   onError,
 }: {
@@ -366,6 +378,12 @@ export function Inspector({
   onDelete: () => void;
   onSource: (id: string) => void;
   onMethod?: (id: string) => void;
+  onReadSource?: () => void;
+  onSummarize?: () => void;
+  reviewerClaims?: ResearchClaim[];
+  reviewerSourceVersion?: string;
+  onCitation?: (citation: Citation) => void;
+  onEvidence?: (id: string) => void;
   onConnection: (c: Connection) => void;
   onError: (e: unknown) => void;
 }) {
@@ -388,6 +406,20 @@ export function Inspector({
           {card.methodId ? "Research method" : card.kind}
         </span>
         <h2>{card.title}</h2>
+        {onReadSource && (
+          <button className="button primary full" onClick={onReadSource}>
+            Open source
+          </button>
+        )}
+        {onSummarize && (
+          <button
+            className="button quiet full item-insight-trigger"
+            onClick={onSummarize}
+          >
+            <Sparkles size={16} />
+            AI summary & research advice
+          </button>
+        )}
         {card.methodId && onMethod && (
           <button
             className="button primary full"
@@ -413,6 +445,14 @@ export function Inspector({
           {card.content ||
             "No observations yet. Edit this item to add context."}
         </p>
+        {onCitation && (
+          <ReviewerNotes
+            claims={reviewerClaims}
+            displayedVersionId={reviewerSourceVersion}
+            onCitation={onCitation}
+            onEvidence={onEvidence}
+          />
+        )}
         {card.url && (
           <button
             className="source-link"
@@ -538,6 +578,11 @@ export function ConnectionDialog({
     "contradicts",
     "derived from",
     "investigate",
+    "informs",
+    "identifies gap",
+    "addresses",
+    "depends on",
+    "produces",
   ];
   return (
     <Modal title="A meaningful connection" onClose={onClose}>
@@ -557,6 +602,10 @@ export function ConnectionDialog({
       </label>
       <p className="connection-endpoint">
         → {project.cards.find((c) => c.id === connection.target)?.title}
+      </p>
+      <p className="subtle-note">
+        Board connections describe relationships. They do not change evidence
+        assessments, confidence, or task completion.
       </p>
       <div className="modal-actions">
         <button className="button quiet danger" onClick={onDelete}>

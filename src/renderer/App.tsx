@@ -30,6 +30,7 @@ import {
   CheckSquare,
   MessageCircle,
   Globe,
+  GitBranch,
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
@@ -54,7 +55,17 @@ import ResearchWorkspace, {
   type ResearchView,
 } from "./components/ResearchWorkspace";
 import type { Citation, ProjectPrivacy } from "../shared/research";
-import { createMethodWorksheet } from "../shared/pedigree";
+import { emptyPedigreeState } from "../shared/pedigree";
+import type { BoardReference } from "../shared/board";
+import type { Passage } from "../shared/research";
+import { usePedigree } from "./components/pedigree-state";
+import { BoardMappingProvider } from "./components/BoardMappingContext";
+import { BoardItemPicker } from "./components/BoardItemPicker";
+import { ResearchFlowWorkspace } from "./components/ResearchFlowWorkspace";
+import { presentBoardCard, boardLabels } from "./components/boardPresentation";
+import { LinkedItemInspector } from "./components/LinkedItemInspector";
+import type { ItemInsightTarget } from "../shared/item-insight";
+import { ItemInsightDialog } from "./components/ItemInsightDialog";
 import Collector from "./components/Collector";
 import Releaser from "./components/Releaser";
 import { cardIcons } from "./components/ResearchNode";
@@ -88,6 +99,7 @@ const viewLabels = {
   tasks: "Tasks",
   inquiry: "Ask & analyze",
   discovery: "Discover",
+  flow: "Gaps & decisions",
 };
 const viewIcons = {
   brief: BookOpen,
@@ -98,6 +110,7 @@ const viewIcons = {
   tasks: CheckSquare,
   inquiry: MessageCircle,
   discovery: Globe,
+  flow: GitBranch,
 };
 const api = () => window.acadia!;
 const uid = () => crypto.randomUUID();
@@ -112,6 +125,11 @@ const kinds: CardKind[] = [
   "video",
 ];
 export default function App() {
+  const [insightTarget, setInsightTarget] = useState<ItemInsightTarget>();
+  const openItemInsight = useCallback(
+    (id: string) => setInsightTarget({ kind: "card", id }),
+    [],
+  );
   const [methodRequest, setMethodRequest] = useState<{
     id: string;
     key: number;
@@ -143,6 +161,17 @@ export default function App() {
     key: number;
   }>();
   const [newReportRequest, setNewReportRequest] = useState(0);
+  const [newDeliveryPlanRequest, setNewDeliveryPlanRequest] = useState(0);
+  const [taskRequest, setTaskRequest] = useState<{ id: string; key: number }>();
+  const [assumptionRequest, setAssumptionRequest] = useState<{
+    id: string;
+    key: number;
+  }>();
+  const [flowRequest, setFlowRequest] = useState<{
+    kind: "gap" | "decision";
+    id?: string;
+    key: number;
+  }>();
   const [claimRequest, setClaimRequest] = useState<{
     id: string;
     key: number;
@@ -168,6 +197,64 @@ export default function App() {
   );
   const [researchView, setResearchView] = useState<ResearchView>("board");
   const research = useResearch(project?.id);
+  const { state: pedigree } = usePedigree(
+    project?.id || "",
+    Boolean(project && !outputWindow),
+  );
+  const [boardPassages, setBoardPassages] = useState<
+    Record<string, Passage | null>
+  >({});
+  const passageRefs = JSON.stringify(
+    project?.cards
+      .filter((card) => card.boardReference?.kind === "passage")
+      .map((card) => card.boardReference) || [],
+  );
+  useEffect(() => {
+    let alive = true;
+    setBoardPassages({});
+    if (!project || outputWindow) return;
+    const ids = [
+      ...new Set(
+        project.cards
+          .filter((card) => card.boardReference?.kind === "passage")
+          .map((card) => card.boardReference!.id),
+      ),
+    ];
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          return [id, await api().getPassage(id)] as const;
+        } catch {
+          return [id, null] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (alive) setBoardPassages(Object.fromEntries(entries));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [project?.id, passageRefs, research.versions, outputWindow]);
+  const presentations = useMemo(
+    () =>
+      Object.fromEntries(
+        (project?.cards || []).map((card) => [
+          card.id,
+          presentBoardCard(card, project!, research, pedigree, boardPassages),
+        ]),
+      ),
+    [project, research, pedigree, boardPassages],
+  );
+  const boardProject = useMemo(
+    () =>
+      project
+        ? {
+            ...project,
+            cards: project.cards.map((card) => presentations[card.id].card),
+          }
+        : null,
+    [project, presentations],
+  );
   const [reader, setReader] = useState<{
     sourceId: string;
     versionId?: string;
@@ -210,6 +297,15 @@ export default function App() {
   const savePromise = useRef<Promise<unknown>>(Promise.resolve());
   const restoreNavigation = (p: Project) => {
     if (outputWindow) return;
+    setInsightTarget(undefined);
+    setMethodRequest(undefined);
+    setClaimRequest(undefined);
+    setTaskRequest(undefined);
+    setAssumptionRequest(undefined);
+    setFlowRequest(undefined);
+    setReportRequest(undefined);
+    setNewReportRequest(0);
+    setNewDeliveryPlanRequest(0);
     const state = readNavigation(p);
     setTab(state.tab);
     setResearchView(state.view);
@@ -502,6 +598,144 @@ export default function App() {
     setSelected(id);
     setFocus((f) => ({ id, key: f.key + 1 }));
   };
+  const addBoardReference = async (
+    reference: BoardReference,
+    options?: { tags: string[] },
+  ) => {
+    const originalId = project?.id;
+    if (!originalId || outputWindow)
+      throw new Error("Open an editable investigation first.");
+    window.dispatchEvent(new Event("acadia:flush-report"));
+    await savePromise.current;
+    if (latest.current?.id !== originalId)
+      throw new Error(
+        "The active investigation changed. Reopen its records to add them.",
+      );
+    await api().save(latest.current);
+    if (latest.current?.id !== originalId)
+      throw new Error("The active investigation changed before placement.");
+    const result = await api().addBoardReference(reference);
+    if (latest.current?.id !== originalId)
+      throw new Error(
+        "The card was saved in its original investigation. Open that investigation to view it.",
+      );
+    const card = result.project.cards.find(
+      (entry) => entry.id === result.cardId,
+    )!;
+    if (!latest.current.cards.some((entry) => entry.id === result.cardId)) {
+      const placed = {
+        ...card,
+        ...(addPosition.current || {}),
+        ...(options?.tags
+          ? { tags: [...new Set([...card.tags, ...options.tags])].slice(0, 20) }
+          : {}),
+      };
+      boardChange((current) => ({
+        ...current,
+        schemaVersion: result.project.schemaVersion,
+        cards: [...current.cards, placed],
+      }));
+    }
+    addPosition.current = null;
+    setDialog(null);
+    setReader(undefined);
+    setTab("collector");
+    setResearchView("board");
+    setSelected(result.cardId);
+    setFocus((value) => ({ id: result.cardId, key: value.key + 1 }));
+    setToast("Linked research item is on the board.");
+  };
+  const openBoardRecord = (reference: BoardReference) => {
+    if (
+      Object.values(presentations).some(
+        (item) =>
+          item.unavailable &&
+          item.reference?.kind === reference.kind &&
+          item.reference.id === reference.id &&
+          item.reference.versionId === reference.versionId,
+      )
+    ) {
+      setToast(
+        "This linked record is unavailable. Its board placement remains saved.",
+      );
+      return;
+    }
+    setDialog(null);
+    setReader(undefined);
+    setTab("collector");
+    const key = Date.now(),
+      { kind, id } = reference;
+    if (kind === "source")
+      setReader({ sourceId: id, versionId: reference.versionId });
+    else if (kind === "passage") {
+      const originalId = project?.id;
+      void api()
+        .getPassage(id)
+        .then((passage) => {
+          if (latest.current?.id === originalId)
+            setReader({
+              sourceId: passage.sourceId,
+              versionId: reference.versionId,
+              passageId: id,
+            });
+        })
+        .catch(fail);
+    } else if (kind === "brief") setResearchView("brief");
+    else if (kind === "claim" || kind === "review") {
+      setResearchView("evidence");
+      setClaimRequest({ id, key });
+    } else if (kind === "assumption") {
+      setResearchView("evidence");
+      setAssumptionRequest({ id, key });
+    } else if (kind === "task") {
+      setResearchView("tasks");
+      setTaskRequest({ id, key });
+    } else if (kind === "method") {
+      setResearchView("methods");
+      setMethodRequest({ id, key });
+    } else if (kind === "gap" || kind === "decision") {
+      setResearchView("flow");
+      setFlowRequest({ kind, id, key });
+    } else {
+      setTab("releaser");
+      setReportRequest({ id, key });
+    }
+  };
+  const createBoardRecord = (
+    kind:
+      | "brief"
+      | "claim"
+      | "assumption"
+      | "task"
+      | "gap"
+      | "decision"
+      | "report"
+      | "delivery-plan",
+  ) => {
+    setDialog(null);
+    setReader(undefined);
+    setTab("collector");
+    const key = Date.now();
+    if (kind === "brief") setResearchView("brief");
+    else if (kind === "claim") {
+      setResearchView("evidence");
+      setClaimRequest({ id: "new", key });
+    } else if (kind === "assumption") {
+      setResearchView("evidence");
+      setAssumptionRequest({ id: "new", key });
+    } else if (kind === "task") {
+      setResearchView("tasks");
+      setTaskRequest({ id: "new", key });
+    } else if (kind === "gap" || kind === "decision") {
+      setResearchView("flow");
+      setFlowRequest({ kind, key });
+    } else {
+      setTab("releaser");
+      if (kind === "report") setNewReportRequest(key);
+      else setNewDeliveryPlanRequest(key);
+    }
+    setToast("Save the record, then choose Add to board to place it.");
+  };
   const connect = (c: FlowConnection) => {
     if (!c.source || !c.target || c.source === c.target) return;
     if (
@@ -621,17 +855,21 @@ export default function App() {
       fail(e);
     }
   };
-  const selectedCard = project?.cards.find((c) => c.id === selected);
+  const selectedCard = boardProject?.cards.find((c) => c.id === selected);
+  const selectedPresentation = selected ? presentations[selected] : undefined;
   const filtered = useMemo(
     () =>
-      project?.cards.filter(
+      boardProject?.cards.filter(
         (c) =>
-          (filter === "all" || c.kind === filter) &&
+          (filter === "all" ||
+            (presentations[c.id]?.reference
+              ? presentations[c.id].reference!.kind === filter
+              : c.kind === filter)) &&
           `${c.title} ${c.content} ${c.extraction || ""} ${c.tags.join(" ")}`
             .toLowerCase()
             .includes(search.toLowerCase()),
       ) || [],
-    [project?.cards, search, filter],
+    [boardProject?.cards, presentations, search, filter],
   );
   const output = (o: ResearchOutput) => {
     if (latest.current?.id === project?.id) {
@@ -730,1099 +968,1265 @@ export default function App() {
       </div>
     );
   return (
-    <div className={`app desktop-app ${outputWindow ? "output-display" : ""}`}>
-      <div className="desktop-layout" style={paneStyle}>
-        {!outputWindow && navigationOpen && (
-          <>
-            <aside className="app-navigation" aria-label="Workspace navigation">
-              <div className="navigation-brand">
-                <img src={acadiaIcon} alt="Acadia app icon" />
-                <strong>Acadia</strong>
-                <button
-                  className="icon-button"
-                  aria-label="Hide navigation"
-                  onClick={() => setNavigationOpen(false)}
-                >
-                  <PanelLeftClose size={17} />
-                </button>
-              </div>
-              <div className="navigation-project">
-                <button
-                  className="project-switcher"
-                  onClick={() => setLibrary(true)}
-                  title={project.title}
-                >
-                  <FolderOpen size={17} />
-                  <span>
-                    {project.title}
-                    <small>Project library</small>
-                  </span>
-                </button>
-                <div className="project-menu-anchor">
+    <BoardMappingProvider
+      value={
+        outputWindow
+          ? undefined
+          : { addToBoard: addBoardReference, openRecord: openBoardRecord }
+      }
+    >
+      <div
+        className={`app desktop-app ${outputWindow ? "output-display" : ""}`}
+      >
+        <div className="desktop-layout" style={paneStyle}>
+          {!outputWindow && navigationOpen && (
+            <>
+              <aside
+                className="app-navigation"
+                aria-label="Workspace navigation"
+              >
+                <div className="navigation-brand">
+                  <img src={acadiaIcon} alt="Acadia app icon" />
+                  <strong>Acadia</strong>
                   <button
                     className="icon-button"
-                    aria-label="Project menu"
-                    onClick={() => setProjectMenu(!projectMenu)}
+                    aria-label="Hide navigation"
+                    onClick={() => setNavigationOpen(false)}
                   >
-                    <ChevronDown size={16} />
+                    <PanelLeftClose size={17} />
                   </button>
-                  {projectMenu && (
-                    <>
-                      <button
-                        className="menu-dismiss"
-                        aria-label="Close project menu"
-                        onClick={() => setProjectMenu(false)}
-                      />
-                      <div className="project-menu">
-                        <button
-                          onClick={() => {
-                            setDialog("new");
-                            setProjectMenu(false);
-                          }}
-                        >
-                          <FilePlus2 size={16} />
-                          New research board
-                        </button>
-                        <button
-                          onClick={() => {
-                            setLibrary(true);
-                            setProjectMenu(false);
-                          }}
-                        >
-                          <FolderOpen size={16} />
-                          Project library
-                        </button>
-                        <button
-                          disabled={busy}
-                          onClick={() => newOrOpen("open")}
-                        >
-                          <FolderOpen size={16} />
-                          Import portable project
-                        </button>
-                        <button onClick={exportProject}>
-                          <Download size={16} />
-                          Export portable project
-                        </button>
-                        <button
-                          disabled={busy}
-                          onClick={() => void exportPowerBI()}
-                        >
-                          <Download size={16} />
-                          Export data for Power BI
-                        </button>
-                      </div>
-                    </>
-                  )}
                 </div>
-              </div>
-              <nav className="navigation-views" aria-label="Research views">
-                <div
-                  className="workspace-switch"
-                  role="tablist"
-                  aria-label="Workspace view"
-                  aria-orientation="vertical"
-                  onKeyDown={(e) => {
-                    if (
-                      !["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)
-                    )
-                      return;
-                    e.preventDefault();
-                    const next =
-                      e.key === "Home"
-                        ? "collector"
-                        : e.key === "End"
-                          ? "releaser"
-                          : tab === "collector"
-                            ? "releaser"
-                            : "collector";
-                    setTab(next);
-                    document.getElementById(`${next}-tab`)?.focus();
-                  }}
-                >
+                <div className="navigation-project">
                   <button
-                    id="collector-tab"
-                    role="tab"
-                    aria-selected={tab === "collector"}
-                    aria-controls="workspace-content"
-                    tabIndex={tab === "collector" ? 0 : -1}
-                    className={tab === "collector" ? "active" : ""}
-                    onClick={() => setTab("collector")}
+                    className="project-switcher"
+                    onClick={() => setLibrary(true)}
+                    title={project.title}
                   >
-                    <Network size={17} />
-                    Collector
+                    <FolderOpen size={17} />
+                    <span>
+                      {project.title}
+                      <small>Project library</small>
+                    </span>
                   </button>
-                  <button
-                    id="releaser-tab"
-                    role="tab"
-                    aria-selected={tab === "releaser"}
-                    aria-controls="workspace-content"
-                    tabIndex={tab === "releaser" ? 0 : -1}
-                    className={tab === "releaser" ? "active" : ""}
-                    onClick={() => setTab("releaser")}
-                  >
-                    <Sparkles size={17} />
-                    Releaser
-                  </button>
-                </div>
-                <div className="navigation-section-label">
-                  {tab === "collector" ? "Investigation" : "Writing & release"}
-                </div>
-                {tab === "collector" ? (
-                  (Object.keys(viewLabels) as ResearchView[]).map((v) => {
-                    const Icon = viewIcons[v];
-                    return (
-                      <button
-                        key={v}
-                        className={`navigation-link ${researchView === v ? "active" : ""}`}
-                        aria-current={researchView === v ? "page" : undefined}
-                        onClick={() => setResearchView(v)}
-                      >
-                        <Icon size={17} />
-                        {viewLabels[v]}
-                      </button>
-                    );
-                  })
-                ) : (
-                  <>
+                  <div className="project-menu-anchor">
                     <button
-                      className="navigation-link active"
+                      className="icon-button"
+                      aria-label="Project menu"
+                      onClick={() => setProjectMenu(!projectMenu)}
+                    >
+                      <ChevronDown size={16} />
+                    </button>
+                    {projectMenu && (
+                      <>
+                        <button
+                          className="menu-dismiss"
+                          aria-label="Close project menu"
+                          onClick={() => setProjectMenu(false)}
+                        />
+                        <div className="project-menu">
+                          <button
+                            onClick={() => {
+                              setDialog("new");
+                              setProjectMenu(false);
+                            }}
+                          >
+                            <FilePlus2 size={16} />
+                            New research board
+                          </button>
+                          <button
+                            onClick={() => {
+                              setLibrary(true);
+                              setProjectMenu(false);
+                            }}
+                          >
+                            <FolderOpen size={16} />
+                            Project library
+                          </button>
+                          <button
+                            disabled={busy}
+                            onClick={() => newOrOpen("open")}
+                          >
+                            <FolderOpen size={16} />
+                            Import portable project
+                          </button>
+                          <button onClick={exportProject}>
+                            <Download size={16} />
+                            Export portable project
+                          </button>
+                          <button
+                            disabled={busy}
+                            onClick={() => void exportPowerBI()}
+                          >
+                            <Download size={16} />
+                            Export data for Power BI
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <nav className="navigation-views" aria-label="Research views">
+                  <div
+                    className="workspace-switch"
+                    role="tablist"
+                    aria-label="Workspace view"
+                    aria-orientation="vertical"
+                    onKeyDown={(e) => {
+                      if (
+                        !["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)
+                      )
+                        return;
+                      e.preventDefault();
+                      const next =
+                        e.key === "Home"
+                          ? "collector"
+                          : e.key === "End"
+                            ? "releaser"
+                            : tab === "collector"
+                              ? "releaser"
+                              : "collector";
+                      setTab(next);
+                      document.getElementById(`${next}-tab`)?.focus();
+                    }}
+                  >
+                    <button
+                      id="collector-tab"
+                      role="tab"
+                      aria-selected={tab === "collector"}
+                      aria-controls="workspace-content"
+                      tabIndex={tab === "collector" ? 0 : -1}
+                      className={tab === "collector" ? "active" : ""}
+                      onClick={() => setTab("collector")}
+                    >
+                      <Network size={17} />
+                      Collector
+                    </button>
+                    <button
+                      id="releaser-tab"
+                      role="tab"
+                      aria-selected={tab === "releaser"}
+                      aria-controls="workspace-content"
+                      tabIndex={tab === "releaser" ? 0 : -1}
+                      className={tab === "releaser" ? "active" : ""}
                       onClick={() => setTab("releaser")}
                     >
-                      <BookOpen size={17} />
-                      Reports
+                      <Sparkles size={17} />
+                      Releaser
+                    </button>
+                  </div>
+                  <div className="navigation-section-label">
+                    {tab === "collector"
+                      ? "Investigation"
+                      : "Writing & release"}
+                  </div>
+                  {tab === "collector" ? (
+                    (Object.keys(viewLabels) as ResearchView[]).map((v) => {
+                      const Icon = viewIcons[v];
+                      return (
+                        <button
+                          key={v}
+                          className={`navigation-link ${researchView === v ? "active" : ""}`}
+                          aria-current={researchView === v ? "page" : undefined}
+                          onClick={() => setResearchView(v)}
+                        >
+                          <Icon size={17} />
+                          {viewLabels[v]}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <>
+                      <button
+                        className="navigation-link active"
+                        onClick={() => setTab("releaser")}
+                      >
+                        <BookOpen size={17} />
+                        Reports
+                      </button>
+                      <button
+                        className="navigation-link"
+                        onClick={() => setNewReportRequest((n) => n + 1)}
+                      >
+                        <FilePlus2 size={17} />
+                        Create report
+                      </button>
+                      <button className="navigation-link" onClick={openDisplay}>
+                        <MonitorUp size={17} />
+                        Present release
+                      </button>
+                    </>
+                  )}
+                </nav>
+                <div className="navigation-utilities">
+                  <button
+                    className="navigation-engine"
+                    aria-label="Research engine settings"
+                    onClick={() => setDialog("settings")}
+                  >
+                    <span className="engine-indicator" />
+                    <span>
+                      <strong>
+                        {project.privacy?.provider === "offline" ||
+                        !project.privacy?.provider
+                          ? "Offline evidence"
+                          : project.privacy?.mode === "cloud"
+                            ? "AI · Server or cloud"
+                            : "AI · This computer"}
+                      </strong>
+                      <small>{project.privacy?.model || "No AI model"}</small>
+                    </span>
+                    <Settings2 size={16} />
+                  </button>
+                  <div className="navigation-utility-row">
+                    <button
+                      className="icon-button"
+                      aria-label="Appearance"
+                      title="Appearance"
+                      onClick={() => setDialog("appearance")}
+                    >
+                      <Palette size={17} />
                     </button>
                     <button
-                      className="navigation-link"
-                      onClick={() => setNewReportRequest((n) => n + 1)}
+                      className="icon-button"
+                      aria-label="Commands"
+                      title="Commands"
+                      onClick={() => setPalette(true)}
                     >
-                      <FilePlus2 size={17} />
-                      Create report
+                      <Command size={17} />
                     </button>
-                    <button className="navigation-link" onClick={openDisplay}>
-                      <MonitorUp size={17} />
-                      Present release
+                    <button
+                      className="icon-button"
+                      aria-label="Workspace guide"
+                      title="Workspace guide"
+                      onClick={() => setDialog("help")}
+                    >
+                      <HelpCircle size={17} />
                     </button>
-                  </>
-                )}
-              </nav>
-              <div className="navigation-utilities">
-                <button
-                  className="navigation-engine"
-                  aria-label="Research engine settings"
-                  onClick={() => setDialog("settings")}
-                >
-                  <span className="engine-indicator" />
-                  <span>
-                    <strong>
-                      {project.privacy?.provider === "offline" ||
-                      !project.privacy?.provider
-                        ? "Offline evidence"
-                        : project.privacy?.mode === "cloud"
-                          ? "AI · Server or cloud"
-                          : "AI · This computer"}
-                    </strong>
-                    <small>{project.privacy?.model || "No AI model"}</small>
-                  </span>
-                  <Settings2 size={16} />
-                </button>
-                <div className="navigation-utility-row">
-                  <button
-                    className="icon-button"
-                    aria-label="Appearance"
-                    title="Appearance"
-                    onClick={() => setDialog("appearance")}
-                  >
-                    <Palette size={17} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label="Commands"
-                    title="Commands"
-                    onClick={() => setPalette(true)}
-                  >
-                    <Command size={17} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label="Workspace guide"
-                    title="Workspace guide"
-                    onClick={() => setDialog("help")}
-                  >
-                    <HelpCircle size={17} />
-                  </button>
-                </div>
-              </div>
-            </aside>
-            <ResizeHandle
-              label="Navigation width"
-              value={navigationWidth}
-              min={170}
-              max={290}
-              onChange={setNavigationWidth}
-              onCommit={(n) => storeWidth("navigation", n)}
-            />
-          </>
-        )}
-        <div className="desktop-workspace">
-          <header className="desktop-toolbar">
-            {!outputWindow && !navigationOpen && (
-              <button
-                className="icon-button"
-                aria-label="Show navigation"
-                onClick={() => setNavigationOpen(true)}
-              >
-                <PanelLeftOpen size={18} />
-              </button>
-            )}
-            <div className="desktop-project-heading">
-              <button
-                className="project-title"
-                title="Edit project title and research question"
-                onClick={() => !outputWindow && setDialog("project")}
-              >
-                {project.title}
-              </button>
-              <span title={project.question}>
-                {outputWindow
-                  ? "Released report · Audience display"
-                  : project.question || "Define your research question"}
-              </span>
-            </div>
-            {!outputWindow && (
-              <>
-                <button
-                  className="button quiet workspace-search-button"
-                  aria-label="Search investigation"
-                  onClick={() => setGlobalSearch(true)}
-                >
-                  <Search size={16} />
-                  <span>Search</span>
-                  <kbd>
-                    {desktop.appearance.platform === "darwin" ? "⌘" : "Ctrl"} F
-                  </kbd>
-                </button>
-                <button
-                  className="button quiet display-button"
-                  aria-label="Open display"
-                  title="Present a released report"
-                  onClick={openDisplay}
-                >
-                  <MonitorUp size={16} />
-                  <span>Present</span>
-                </button>
-              </>
-            )}
-            {outputWindow && (
-              <button
-                className="icon-button"
-                aria-label="Toggle fullscreen"
-                onClick={() => api().fullscreen().catch(fail)}
-              >
-                <Maximize size={18} />
-              </button>
-            )}
-          </header>
-          {error && (
-            <div className="error-banner" role="alert">
-              <span>{error}</span>
-              <button
-                className="icon-button"
-                onClick={() => setError("")}
-                aria-label="Dismiss error"
-              >
-                <X size={17} />
-              </button>
-            </div>
-          )}
-          <div
-            className={`workspace-content-row ${reader ? "has-reader" : ""}`}
-          >
-            <div
-              className="workspace-primary"
-              id="workspace-content"
-              role="tabpanel"
-              aria-labelledby={outputWindow ? undefined : `${tab}-tab`}
-            >
-              {tab === "collector" ? (
-                <>
-                  <div className="collector-toolbar">
-                    <div className="collector-title">
-                      {researchView === "board" && (
-                        <button
-                          className={`icon-button ${sidebar ? "active" : ""}`}
-                          onClick={() => setSidebar(!sidebar)}
-                          aria-label="Toggle board items"
-                          title="Board items"
-                        >
-                          <Menu size={18} />
-                        </button>
-                      )}
-                      <h1
-                        aria-label={
-                          researchView === "board" ? "THE COLLECTOR" : undefined
-                        }
-                      >
-                        {viewLabels[researchView]}
-                      </h1>
-                    </div>
-                    <div className="toolbar-actions">
-                      {researchView === "board" && (
-                        <>
-                          <button
-                            className="icon-button"
-                            disabled={!history.length}
-                            onClick={undo}
-                            aria-label="Undo"
-                          >
-                            <Undo2 size={17} />
-                          </button>
-                          <button
-                            className="icon-button"
-                            disabled={!future.length}
-                            onClick={redo}
-                            aria-label="Redo"
-                          >
-                            <Redo2 size={17} />
-                          </button>
-                          <span className="tool-divider" />
-                        </>
-                      )}
-                      <button
-                        className="button quiet"
-                        disabled={busy}
-                        onClick={importFiles}
-                      >
-                        <FileUp size={16} />
-                        Import files
-                      </button>
-                      <button
-                        className="button primary"
-                        onClick={() => {
-                          addPosition.current = null;
-                          setDialog("add");
-                        }}
-                      >
-                        <Plus size={17} />
-                        Add item
-                      </button>
-                    </div>
                   </div>
-                  {researchView === "board" ? (
-                    <main className="collector-layout">
-                      {sidebar && (
-                        <aside className="source-library">
-                          <div className="library-heading">
-                            <span className="eyebrow">BOARD ITEMS</span>
-                            <span className="count-chip">
-                              {project.cards.length}
-                            </span>
-                          </div>
-                          <label className="library-search">
-                            <Search size={15} />
-                            <input
-                              aria-label="Search research"
-                              placeholder="Search your research…"
-                              value={search}
-                              onChange={(e) => setSearch(e.target.value)}
-                            />
-                            {search && (
-                              <button
-                                aria-label="Clear search"
-                                onClick={() => setSearch("")}
-                              >
-                                <X size={13} />
-                              </button>
-                            )}
-                          </label>
-                          <label className="sr-only" htmlFor="kind-filter">
-                            Filter source type
-                          </label>
-                          <select
-                            id="kind-filter"
-                            className="kind-filter"
-                            value={filter}
-                            onChange={(e) => setFilter(e.target.value)}
+                </div>
+              </aside>
+              <ResizeHandle
+                label="Navigation width"
+                value={navigationWidth}
+                min={170}
+                max={290}
+                onChange={setNavigationWidth}
+                onCommit={(n) => storeWidth("navigation", n)}
+              />
+            </>
+          )}
+          <div className="desktop-workspace">
+            <header className="desktop-toolbar">
+              {!outputWindow && !navigationOpen && (
+                <button
+                  className="icon-button"
+                  aria-label="Show navigation"
+                  onClick={() => setNavigationOpen(true)}
+                >
+                  <PanelLeftOpen size={18} />
+                </button>
+              )}
+              <div className="desktop-project-heading">
+                <button
+                  className="project-title"
+                  title="Edit project title and research question"
+                  onClick={() => !outputWindow && setDialog("project")}
+                >
+                  {project.title}
+                </button>
+                <span title={project.question}>
+                  {outputWindow
+                    ? "Released report · Audience display"
+                    : project.question || "Define your research question"}
+                </span>
+              </div>
+              {!outputWindow && (
+                <>
+                  <button
+                    className="button quiet workspace-search-button"
+                    aria-label="Search investigation"
+                    onClick={() => setGlobalSearch(true)}
+                  >
+                    <Search size={16} />
+                    <span>Search</span>
+                    <kbd>
+                      {desktop.appearance.platform === "darwin" ? "⌘" : "Ctrl"}{" "}
+                      F
+                    </kbd>
+                  </button>
+                  <button
+                    className="button quiet display-button"
+                    aria-label="Open display"
+                    title="Present a released report"
+                    onClick={openDisplay}
+                  >
+                    <MonitorUp size={16} />
+                    <span>Present</span>
+                  </button>
+                </>
+              )}
+              {outputWindow && (
+                <button
+                  className="icon-button"
+                  aria-label="Toggle fullscreen"
+                  onClick={() => api().fullscreen().catch(fail)}
+                >
+                  <Maximize size={18} />
+                </button>
+              )}
+            </header>
+            {error && (
+              <div className="error-banner" role="alert">
+                <span>{error}</span>
+                <button
+                  className="icon-button"
+                  onClick={() => setError("")}
+                  aria-label="Dismiss error"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+            )}
+            <div
+              className={`workspace-content-row ${reader ? "has-reader" : ""}`}
+            >
+              <div
+                className="workspace-primary"
+                id="workspace-content"
+                role="tabpanel"
+                aria-labelledby={outputWindow ? undefined : `${tab}-tab`}
+              >
+                {tab === "collector" ? (
+                  <>
+                    <div className="collector-toolbar">
+                      <div className="collector-title">
+                        {researchView === "board" && (
+                          <button
+                            className={`icon-button ${sidebar ? "active" : ""}`}
+                            onClick={() => setSidebar(!sidebar)}
+                            aria-label="Toggle board items"
+                            title="Board items"
                           >
-                            <option value="all">All research items</option>
-                            {kinds.map((k) => (
-                              <option value={k} key={k}>
-                                {k === "hypothesis"
-                                  ? "Hypotheses"
-                                  : k.charAt(0).toUpperCase() +
-                                    k.slice(1) +
-                                    "s"}{" "}
-                                (
-                                {
-                                  project.cards.filter((c) => c.kind === k)
-                                    .length
-                                }
-                                )
-                              </option>
-                            ))}
-                          </select>
-                          <div className="library-items">
-                            {filtered.map((c) => {
-                              const Icon = cardIcons[c.kind];
-                              return (
-                                <button
-                                  className={`library-item ${selected === c.id ? "selected" : ""}`}
-                                  key={c.id}
-                                  onClick={() => focusSource(c.id)}
-                                >
-                                  <Icon
-                                    size={16}
-                                    className={`kind-color-${c.kind}`}
-                                  />
-                                  <span>
-                                    <strong>{c.title}</strong>
-                                    <small>
-                                      {c.kind} <span>·</span> {c.status}
-                                    </small>
-                                  </span>
-                                  <span className={`status-dot ${c.status}`} />
-                                </button>
-                              );
-                            })}
-                            {filtered.length === 0 && (
-                              <p className="library-empty">
-                                {search
-                                  ? "No matching research."
-                                  : "No items here yet."}
-                              </p>
-                            )}
-                          </div>
-                          <div className="library-bottom">
-                            <span className="eyebrow">RESEARCH QUESTION</span>
-                            <p>
-                              {project.question ||
-                                "What are you trying to understand?"}
-                            </p>
+                            <Menu size={18} />
+                          </button>
+                        )}
+                        <h1
+                          aria-label={
+                            researchView === "board"
+                              ? "THE COLLECTOR"
+                              : undefined
+                          }
+                        >
+                          {viewLabels[researchView]}
+                        </h1>
+                      </div>
+                      <div className="toolbar-actions">
+                        {researchView === "board" && (
+                          <>
                             <button
-                              className="text-button"
-                              onClick={() => setDialog("project")}
+                              className="icon-button"
+                              disabled={!history.length}
+                              onClick={undo}
+                              aria-label="Undo"
                             >
-                              REFINE THE QUESTION <ArrowUpRight size={12} />
+                              <Undo2 size={17} />
                             </button>
-                          </div>
-                        </aside>
-                      )}
-                      <Collector
-                        project={project}
-                        selectedId={selected}
-                        onSelect={setSelected}
-                        onMove={(positions) =>
-                          boardChange((p) => ({
-                            ...p,
-                            cards: p.cards.map((c) => {
-                              const pos = positions.find((n) => n.id === c.id);
-                              return pos ? { ...c, x: pos.x, y: pos.y } : c;
-                            }),
-                          }))
-                        }
-                        onConnect={connect}
-                        onEdge={setEdge}
-                        onAdd={(x, y) => {
-                          addPosition.current =
-                            x !== undefined && y !== undefined
-                              ? { x, y }
-                              : null;
-                          setDialog("add");
-                        }}
-                        onDropFiles={dropFiles}
-                        focusId={focus.id}
-                        focusKey={focus.key}
-                        onAreas={() => setAreas(true)}
-                        onSaveView={(view) =>
-                          boardChange((p) => ({
-                            ...p,
-                            views: [...(p.views || []), view],
-                          }))
-                        }
-                      />
-                      {selectedCard && (
-                        <Inspector
-                          card={selectedCard}
-                          project={project}
-                          connections={project.connections.filter(
-                            (c) =>
-                              c.source === selected || c.target === selected,
-                          )}
-                          onClose={() => setSelected(null)}
-                          onEdit={() => setDialog("edit")}
-                          onDelete={() => setDialog("delete")}
-                          onChange={(v) =>
+                            <button
+                              className="icon-button"
+                              disabled={!future.length}
+                              onClick={redo}
+                              aria-label="Redo"
+                            >
+                              <Redo2 size={17} />
+                            </button>
+                            <span className="tool-divider" />
+                          </>
+                        )}
+                        <button
+                          className="button quiet"
+                          disabled={busy}
+                          onClick={importFiles}
+                        >
+                          <FileUp size={16} />
+                          Import files
+                        </button>
+                        <button
+                          className="button primary"
+                          onClick={() => {
+                            addPosition.current = null;
+                            setDialog("add");
+                          }}
+                        >
+                          <Plus size={17} />
+                          Add item
+                        </button>
+                      </div>
+                    </div>
+                    {researchView === "board" ? (
+                      <main className="collector-layout">
+                        {sidebar && (
+                          <aside className="source-library">
+                            <div className="library-heading">
+                              <span className="eyebrow">BOARD ITEMS</span>
+                              <span className="count-chip">
+                                {project.cards.length}
+                              </span>
+                            </div>
+                            <label className="library-search">
+                              <Search size={15} />
+                              <input
+                                aria-label="Search research"
+                                placeholder="Search your research…"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                              />
+                              {search && (
+                                <button
+                                  aria-label="Clear search"
+                                  onClick={() => setSearch("")}
+                                >
+                                  <X size={13} />
+                                </button>
+                              )}
+                            </label>
+                            <label className="sr-only" htmlFor="kind-filter">
+                              Filter source type
+                            </label>
+                            <select
+                              id="kind-filter"
+                              className="kind-filter"
+                              value={filter}
+                              onChange={(e) => setFilter(e.target.value)}
+                            >
+                              <option value="all">All research items</option>
+                              {kinds.map((k) => (
+                                <option value={k} key={k}>
+                                  {k === "hypothesis"
+                                    ? "Hypotheses"
+                                    : k.charAt(0).toUpperCase() +
+                                      k.slice(1) +
+                                      "s"}{" "}
+                                  (
+                                  {
+                                    project.cards.filter(
+                                      (c) =>
+                                        c.kind === k &&
+                                        !presentations[c.id]?.reference,
+                                    ).length
+                                  }
+                                  )
+                                </option>
+                              ))}
+                              {Object.entries(boardLabels).map(
+                                ([kind, label]) => (
+                                  <option key={`linked-${kind}`} value={kind}>
+                                    {label} (
+                                    {
+                                      Object.values(presentations).filter(
+                                        (item) => item.reference?.kind === kind,
+                                      ).length
+                                    }
+                                    )
+                                  </option>
+                                ),
+                              )}
+                            </select>
+                            <div className="library-items">
+                              {filtered.map((c) => {
+                                const Icon = cardIcons[c.kind];
+                                return (
+                                  <button
+                                    className={`library-item ${selected === c.id ? "selected" : ""}`}
+                                    key={c.id}
+                                    onClick={() => focusSource(c.id)}
+                                  >
+                                    <Icon
+                                      size={16}
+                                      className={`kind-color-${c.kind}`}
+                                    />
+                                    <span>
+                                      <strong>{c.title}</strong>
+                                      <small>
+                                        {presentations[c.id]?.label || c.kind}{" "}
+                                        <span>·</span>{" "}
+                                        {presentations[c.id]?.status ||
+                                          c.status}
+                                      </small>
+                                    </span>
+                                    <span
+                                      className={`status-dot ${c.status}`}
+                                    />
+                                  </button>
+                                );
+                              })}
+                              {filtered.length === 0 && (
+                                <p className="library-empty">
+                                  {search
+                                    ? "No matching research."
+                                    : "No items here yet."}
+                                </p>
+                              )}
+                            </div>
+                            <div className="library-bottom">
+                              <span className="eyebrow">RESEARCH QUESTION</span>
+                              <p>
+                                {project.question ||
+                                  "What are you trying to understand?"}
+                              </p>
+                              <button
+                                className="text-button"
+                                onClick={() => setDialog("project")}
+                              >
+                                REFINE THE QUESTION <ArrowUpRight size={12} />
+                              </button>
+                            </div>
+                          </aside>
+                        )}
+                        <Collector
+                          project={boardProject!}
+                          presentations={presentations}
+                          onOpen={(id) => {
+                            const ref = presentations[id]?.reference;
+                            if (ref) openBoardRecord(ref);
+                          }}
+                          selectedId={selected}
+                          onSelect={setSelected}
+                          onMove={(positions) =>
                             boardChange((p) => ({
                               ...p,
-                              cards: p.cards.map((c) =>
-                                c.id === selected
-                                  ? {
-                                      ...c,
-                                      ...v,
-                                      updatedAt: new Date().toISOString(),
-                                    }
-                                  : c,
-                              ),
+                              cards: p.cards.map((c) => {
+                                const pos = positions.find(
+                                  (n) => n.id === c.id,
+                                );
+                                return pos ? { ...c, x: pos.x, y: pos.y } : c;
+                              }),
                             }))
                           }
-                          onSource={focusSource}
-                          onMethod={(id) => {
-                            setMethodRequest({ id, key: Date.now() });
-                            setResearchView("methods");
+                          onConnect={connect}
+                          onEdge={setEdge}
+                          onAdd={(x, y) => {
+                            addPosition.current =
+                              x !== undefined && y !== undefined
+                                ? { x, y }
+                                : null;
+                            setDialog("add");
                           }}
-                          onConnection={setEdge}
-                          onError={fail}
+                          onDropFiles={dropFiles}
+                          onSummarize={openItemInsight}
+                          focusId={focus.id}
+                          focusKey={focus.key}
+                          onAreas={() => setAreas(true)}
+                          onSaveView={(view) =>
+                            boardChange((p) => ({
+                              ...p,
+                              views: [...(p.views || []), view],
+                            }))
+                          }
                         />
-                      )}
-                    </main>
-                  ) : researchView === "brief" ? (
-                    research && (
-                      <PedigreeWorkspace
+                        {selectedCard && selectedPresentation?.reference ? (
+                          <LinkedItemInspector
+                            item={selectedPresentation}
+                            project={boardProject!}
+                            onClose={() => setSelected(null)}
+                            onOpen={() =>
+                              openBoardRecord(selectedPresentation.reference!)
+                            }
+                            onRemove={() => setDialog("delete")}
+                            onConnection={setEdge}
+                            onCard={focusSource}
+                            onSummarize={() => openItemInsight(selectedCard.id)}
+                          />
+                        ) : (
+                          selectedCard && (
+                            <Inspector
+                              card={selectedCard}
+                              project={project}
+                              connections={project.connections.filter(
+                                (c) =>
+                                  c.source === selected ||
+                                  c.target === selected,
+                              )}
+                              onClose={() => setSelected(null)}
+                              onEdit={() => setDialog("edit")}
+                              onReadSource={
+                                research.sources.some(
+                                  (source) =>
+                                    source.cardId === selectedCard.id ||
+                                    source.id === selectedCard.sourceId,
+                                )
+                                  ? () => {
+                                      const source = research.sources.find(
+                                        (entry) =>
+                                          entry.cardId === selectedCard.id ||
+                                          entry.id === selectedCard.sourceId,
+                                      );
+                                      if (source)
+                                        openBoardRecord({
+                                          kind: "source",
+                                          id: source.id,
+                                        });
+                                    }
+                                  : undefined
+                              }
+                              onDelete={() => setDialog("delete")}
+                              onChange={(v) =>
+                                boardChange((p) => ({
+                                  ...p,
+                                  cards: p.cards.map((c) =>
+                                    c.id === selected
+                                      ? {
+                                          ...c,
+                                          ...v,
+                                          updatedAt: new Date().toISOString(),
+                                        }
+                                      : c,
+                                  ),
+                                }))
+                              }
+                              onSource={focusSource}
+                              onSummarize={() =>
+                                openItemInsight(selectedCard.id)
+                              }
+                              reviewerClaims={research.claims.filter(
+                                (claim) =>
+                                  claim.itemReview &&
+                                  ((claim.itemReview.target.kind === "card" &&
+                                    claim.itemReview.target.id ===
+                                      selectedCard.id) ||
+                                    Boolean(
+                                      claim.itemReview.sourceId &&
+                                      research.sources.some(
+                                        (source) =>
+                                          source.id ===
+                                            claim.itemReview!.sourceId &&
+                                          (source.id ===
+                                            selectedCard.sourceId ||
+                                            source.cardId === selectedCard.id),
+                                      ),
+                                    )),
+                              )}
+                              onCitation={openCitation}
+                              reviewerSourceVersion={
+                                research.sources.find(
+                                  (source) =>
+                                    source.id === selectedCard.sourceId ||
+                                    source.cardId === selectedCard.id,
+                                )?.currentVersionId
+                              }
+                              onEvidence={(id) => {
+                                setResearchView("evidence");
+                                setClaimRequest({ id, key: Date.now() });
+                              }}
+                              onMethod={(id) => {
+                                setMethodRequest({ id, key: Date.now() });
+                                setResearchView("methods");
+                              }}
+                              onConnection={setEdge}
+                              onError={fail}
+                            />
+                          )
+                        )}
+                      </main>
+                    ) : researchView === "brief" ? (
+                      research && (
+                        <PedigreeWorkspace
+                          key={project.id}
+                          project={project}
+                          research={research}
+                          onQuestionSaved={(question) =>
+                            latest.current?.id === project.id &&
+                            change((p) => ({ ...p, question }), false)
+                          }
+                          onError={fail}
+                          onSource={(sourceId, versionId, passageId) =>
+                            setReader({ sourceId, versionId, passageId })
+                          }
+                        />
+                      )
+                    ) : researchView === "flow" ? (
+                      <ResearchFlowWorkspace
+                        key={project.id}
                         project={project}
                         research={research}
-                        onQuestionSaved={(question) =>
-                          latest.current?.id === project.id &&
-                          change((p) => ({ ...p, question }), false)
-                        }
                         onError={fail}
+                        request={flowRequest}
+                        onRequestHandled={() => setFlowRequest(undefined)}
+                        onAddToBoard={addBoardReference}
                         onSource={(sourceId, versionId, passageId) =>
                           setReader({ sourceId, versionId, passageId })
                         }
                       />
-                    )
-                  ) : researchView === "methods" ? (
-                    research && (
-                      <MethodsWorkspace
+                    ) : researchView === "methods" ? (
+                      research && (
+                        <MethodsWorkspace
+                          key={project.id}
+                          project={project}
+                          research={research}
+                          onError={fail}
+                          requestedMethod={methodRequest}
+                          onMethodRequestHandled={() =>
+                            setMethodRequest(undefined)
+                          }
+                          onSource={(sourceId, versionId, passageId) =>
+                            setReader({ sourceId, versionId, passageId })
+                          }
+                          onBoard={(method) => {
+                            void addBoardReference({
+                              kind: "method",
+                              id: method.id,
+                            }).catch(fail);
+                          }}
+                        />
+                      )
+                    ) : (
+                      <ResearchWorkspace
+                        requestedTask={taskRequest}
+                        onTaskRequestHandled={() => setTaskRequest(undefined)}
+                        requestedAssumption={assumptionRequest}
+                        onAssumptionRequestHandled={() =>
+                          setAssumptionRequest(undefined)
+                        }
+                        requestedClaim={claimRequest}
+                        onClaimRequestHandled={() => setClaimRequest(undefined)}
+                        key={project.id}
                         project={project}
                         research={research}
+                        view={researchView}
                         onError={fail}
-                        requestedMethod={methodRequest}
-                        onMethodRequestHandled={() =>
-                          setMethodRequest(undefined)
-                        }
                         onSource={(sourceId, versionId, passageId) =>
                           setReader({ sourceId, versionId, passageId })
                         }
-                        onBoard={(method) => {
-                          const existing = project.cards.find(
-                            (card) => card.methodId === method.id,
-                          );
-                          if (existing) {
-                            focusSource(existing.id);
-                            return;
-                          }
-                          const timestamp = new Date().toISOString();
-                          const card: ResearchCard = {
-                            id: uid(),
-                            kind: "note",
-                            methodId: method.id,
-                            title: method.title,
-                            content:
-                              "Linked research method. Open the worksheet to review its current evidence, assumptions, and tasks.",
-                            x: 80,
-                            y: 80,
-                            tags: ["method", method.kind],
-                            status: "unreviewed",
-                            createdAt: timestamp,
-                            updatedAt: timestamp,
-                          };
+                        onCard={focusSource}
+                        onConnection={(connection) =>
                           boardChange((p) => ({
                             ...p,
-                            cards: [...p.cards, card],
-                          }));
-                          setSelected(card.id);
-                          setResearchView("board");
-                          setToast("Method linked to the board.");
-                        }}
+                            connections: p.connections.some(
+                              (c) =>
+                                c.source === connection.source &&
+                                c.target === connection.target,
+                            )
+                              ? p.connections
+                              : [...p.connections, connection],
+                          }))
+                        }
                       />
-                    )
-                  ) : (
-                    <ResearchWorkspace
-                      requestedClaim={claimRequest}
-                      onClaimRequestHandled={() => setClaimRequest(undefined)}
+                    )}
+                  </>
+                ) : (
+                  <main className="releaser-host">
+                    <Releaser
                       key={project.id}
-                      project={project}
+                      onRequestHandled={() => {
+                        setNewReportRequest(0);
+                        setNewDeliveryPlanRequest(0);
+                        setReportRequest(undefined);
+                      }}
+                      requestNewReport={newReportRequest}
+                      requestNewDeliveryPlan={newDeliveryPlanRequest}
+                      requestedReport={reportRequest}
                       research={research}
-                      view={researchView}
-                      onError={fail}
-                      onSource={(sourceId, versionId, passageId) =>
-                        setReader({ sourceId, versionId, passageId })
+                      project={project}
+                      settings={
+                        project.privacy?.provider
+                          ? { ...settings, ...project.privacy }
+                          : settings
                       }
-                      onCard={focusSource}
-                      onConnection={(connection) =>
-                        boardChange((p) => ({
-                          ...p,
-                          connections: p.connections.some(
-                            (c) =>
-                              c.source === connection.source &&
-                              c.target === connection.target,
-                          )
-                            ? p.connections
-                            : [...p.connections, connection],
-                        }))
+                      onOutput={output}
+                      onUpdateOutput={(o) =>
+                        change(
+                          (p) =>
+                            p.id !== project.id
+                              ? p
+                              : {
+                                  ...p,
+                                  outputs: p.outputs.map((x) =>
+                                    x.id === o.id ? o : x,
+                                  ),
+                                },
+                          false,
+                        )
+                      }
+                      onRelease={(outputId, revisionId) =>
+                        change(
+                          (p) =>
+                            p.id !== project.id
+                              ? p
+                              : {
+                                  ...p,
+                                  releasedOutputId: outputId,
+                                  outputs: p.outputs.map((o) =>
+                                    o.id === outputId
+                                      ? { ...o, releasedRevisionId: revisionId }
+                                      : o,
+                                  ),
+                                },
+                          false,
+                        )
+                      }
+                      onCitation={openCitation}
+                      onSettings={() => setDialog("settings")}
+                      readOnly={outputWindow}
+                      onSource={
+                        outputWindow
+                          ? (id) =>
+                              setToast(
+                                project.cards.find((c) => c.id === id)?.title ||
+                                  "Source removed from current board",
+                              )
+                          : focusSource
                       }
                     />
-                  )}
-                </>
-              ) : (
-                <main className="releaser-host">
-                  <Releaser
-                    key={project.id}
-                    onRequestHandled={() => {
-                      setNewReportRequest(0);
-                      setReportRequest(undefined);
-                    }}
-                    requestNewReport={newReportRequest}
-                    requestedReport={reportRequest}
-                    research={research}
-                    project={project}
-                    settings={
-                      project.privacy?.provider
-                        ? { ...settings, ...project.privacy }
-                        : settings
-                    }
-                    onOutput={output}
-                    onUpdateOutput={(o) =>
-                      change(
-                        (p) =>
-                          p.id !== project.id
-                            ? p
-                            : {
-                                ...p,
-                                outputs: p.outputs.map((x) =>
-                                  x.id === o.id ? o : x,
-                                ),
-                              },
-                        false,
-                      )
-                    }
-                    onRelease={(outputId, revisionId) =>
-                      change(
-                        (p) =>
-                          p.id !== project.id
-                            ? p
-                            : {
-                                ...p,
-                                releasedOutputId: outputId,
-                                outputs: p.outputs.map((o) =>
-                                  o.id === outputId
-                                    ? { ...o, releasedRevisionId: revisionId }
-                                    : o,
-                                ),
-                              },
-                        false,
-                      )
-                    }
-                    onCitation={openCitation}
-                    onSettings={() => setDialog("settings")}
-                    readOnly={outputWindow}
-                    onSource={
-                      outputWindow
-                        ? (id) =>
-                            setToast(
-                              project.cards.find((c) => c.id === id)?.title ||
-                                "Source removed from current board",
-                            )
-                        : focusSource
-                    }
+                  </main>
+                )}
+              </div>
+              {reader && (
+                <>
+                  <ResizeHandle
+                    label="Source reader width"
+                    value={readerWidth}
+                    min={310}
+                    max={650}
+                    reverse
+                    onChange={setReaderWidth}
+                    onCommit={(n) => storeWidth("reader", n)}
                   />
-                </main>
+                  <div className="source-reader-dock">
+                    <SourceReader
+                      embedded
+                      {...reader}
+                      key={`${reader.sourceId}:${reader.versionId || ""}`}
+                      project={project}
+                      research={research}
+                      readOnly={outputWindow}
+                      onClose={() => setReader(undefined)}
+                      onSummarize={
+                        outputWindow
+                          ? undefined
+                          : (sourceId, versionId) =>
+                              setInsightTarget({
+                                kind: "source",
+                                id: sourceId,
+                                versionId,
+                              })
+                      }
+                      onNavigate={(sourceId, versionId, passageId) =>
+                        setReader({ sourceId, versionId, passageId })
+                      }
+                      onError={fail}
+                      onBoard={(c) => {
+                        addCard(c);
+                        setReader(undefined);
+                        setResearchView("board");
+                        setTab("collector");
+                      }}
+                    />
+                  </div>
+                </>
               )}
             </div>
-            {reader && (
-              <>
-                <ResizeHandle
-                  label="Source reader width"
-                  value={readerWidth}
-                  min={310}
-                  max={650}
-                  reverse
-                  onChange={setReaderWidth}
-                  onCommit={(n) => storeWidth("reader", n)}
-                />
-                <div className="source-reader-dock">
-                  <SourceReader
-                    embedded
-                    {...reader}
-                    key={`${reader.sourceId}:${reader.versionId || ""}`}
-                    project={project}
-                    research={research}
-                    readOnly={outputWindow}
-                    onClose={() => setReader(undefined)}
-                    onNavigate={(sourceId, versionId, passageId) =>
-                      setReader({ sourceId, versionId, passageId })
-                    }
-                    onError={fail}
-                    onBoard={(c) => {
-                      addCard(c);
-                      setReader(undefined);
-                      setResearchView("board");
-                      setTab("collector");
-                    }}
-                  />
-                </div>
-              </>
-            )}
+            {!outputWindow && <Jobs research={research} onError={fail} />}
+            <footer className="statusbar">
+              <span>
+                <span className="pulse-dot" />
+                {outputWindow ? "Released output" : saveStatus}
+                <span className="footer-divider">/</span>
+                {project.cards.length} ITEMS
+                <span className="footer-divider">/</span>
+                {project.connections.length} CONNECTIONS
+              </span>
+              <span>
+                {(project.privacy?.provider || "offline") === "offline"
+                  ? "OFFLINE OUTLINE"
+                  : `${project.privacy!.provider!.toUpperCase()} ENGINE`}
+                <span className="footer-divider">/</span>ACADIA v{appVersion}
+              </span>
+            </footer>
           </div>
-          {!outputWindow && <Jobs research={research} onError={fail} />}
-          <footer className="statusbar">
-            <span>
-              <span className="pulse-dot" />
-              {outputWindow ? "Released output" : saveStatus}
-              <span className="footer-divider">/</span>
-              {project.cards.length} ITEMS
-              <span className="footer-divider">/</span>
-              {project.connections.length} CONNECTIONS
-            </span>
-            <span>
-              {(project.privacy?.provider || "offline") === "offline"
-                ? "OFFLINE OUTLINE"
-                : `${project.privacy!.provider!.toUpperCase()} ENGINE`}
-              <span className="footer-divider">/</span>ACADIA v{appVersion}
-            </span>
-          </footer>
         </div>
-      </div>
-      {busy && (
-        <div className="busy-indicator" role="status">
-          Working…
-        </div>
-      )}
-      {toast && (
-        <div className="toast" role="status">
-          <Check size={16} />
-          {toast}
-        </div>
-      )}
-      {dialog === "appearance" && (
-        <AppearanceDialog
-          state={desktop}
-          onSave={desktop.save}
-          onClose={() => setDialog(null)}
-        />
-      )}
-      {palette && (
-        <CommandPalette
-          onClose={() => setPalette(false)}
-          onCommand={(command) => {
-            setPalette(false);
-            setTimeout(() => commandRef.current(command), 0);
-          }}
-        />
-      )}
-      {globalSearch && (
-        <InvestigationSearch
-          project={project}
-          research={research}
-          onClose={() => setGlobalSearch(false)}
-          onCard={focusSource}
-          onPassage={(p) =>
-            setReader({
-              sourceId: p.sourceId,
-              versionId: p.versionId,
-              passageId: p.id,
-            })
-          }
-          onReport={(id) => {
-            setTab("releaser");
-            setReportRequest({ id, key: Date.now() });
-          }}
-          onEvidence={(id) => {
-            setReader(undefined);
-            setTab("collector");
-            setResearchView("evidence");
-            setClaimRequest({ id, key: Date.now() });
-          }}
-        />
-      )}
-      {(dialog === "add" || dialog === "edit") && (
-        <CardDialog
-          initial={dialog === "edit" ? selectedCard : undefined}
-          onClose={() => setDialog(null)}
-          onImport={importFiles}
-          onSaveMethod={async ({ kind, title, objective, tags }) => {
-            const projectId = latest.current?.id;
-            if (!projectId) throw new Error("Open an investigation first.");
-            const worksheet = createMethodWorksheet(projectId, kind);
-            const saved = await api().saveMethod({
-              ...worksheet,
-              title,
-              objective,
-            });
-            if (latest.current?.id !== projectId)
-              throw new Error(
-                "The worksheet was saved in its original investigation. Reopen that investigation to add it to its board.",
-              );
-            setTab("collector");
-            setResearchView("board");
-            addCard({
-              kind: "note",
-              methodId: saved.id,
-              title: saved.title,
-              content:
-                saved.objective ||
-                "Linked research method. Open the worksheet to review its evidence, assumptions, and tasks.",
-              tags: [...new Set(["method", saved.kind, ...tags])],
-            });
-            setToast(
-              "Method added to the board. Choose Open worksheet to begin.",
-            );
-          }}
-          onSave={(values) => {
-            if (dialog === "edit") {
-              boardChange((p) => ({
-                ...p,
-                cards: p.cards.map((c) =>
-                  c.id === selected
-                    ? { ...c, ...values, updatedAt: new Date().toISOString() }
-                    : c,
-                ),
-              }));
-              setDialog(null);
-            } else addCard(values);
-          }}
-        />
-      )}
-      {edge && (
-        <ConnectionDialog
-          connection={edge}
-          project={project}
-          onClose={() => setEdge(null)}
-          onDelete={() => {
-            boardChange((p) => ({
-              ...p,
-              connections: p.connections.filter((c) => c.id !== edge.id),
-            }));
-            setEdge(null);
-          }}
-          onSave={(relation) => {
-            boardChange((p) => ({
-              ...p,
-              connections: p.connections.map((c) =>
-                c.id === edge.id ? { ...c, relation } : c,
-              ),
-            }));
-            setEdge(null);
-          }}
-        />
-      )}
-      {dialog === "settings" && (
-        <SettingsDialog
-          settings={
-            project.privacy?.provider
-              ? { ...settings, ...project.privacy }
-              : { provider: "offline", endpoint: "", model: "" }
-          }
-          privacy={project.privacy || { mode: "local" }}
-          onPrivacy={(privacy) =>
-            change(
-              (p) =>
-                p.id === project.id
-                  ? { ...p, privacy, updatedAt: new Date().toISOString() }
-                  : p,
-              false,
-            )
-          }
-          onClose={() => setDialog(null)}
-          onSave={async (s) => {
-            const saved = await api().saveSettings(s);
-            if (latest.current?.id !== project.id) return;
-            setSettings(saved);
-            change(
-              (p) =>
-                p.id !== project.id
-                  ? p
-                  : {
-                      ...p,
-                      privacy: {
-                        mode: p.privacy?.mode || "local",
-                        provider: saved.provider,
-                        endpoint: saved.endpoint,
-                        model: saved.model,
-                      },
-                    },
-              false,
-            );
-            setToast("Research engine saved");
-          }}
-        />
-      )}
-      {dialog === "display" && (
-        <DisplayDialog
-          displays={displays}
-          onClose={() => setDialog(null)}
-          onOpen={(id) => {
-            api()
-              .openReleaser(id)
-              .then(() => {
-                setDialog(null);
-                setToast("Releaser display opened");
+        {busy && (
+          <div className="busy-indicator" role="status">
+            Working…
+          </div>
+        )}
+        {toast && (
+          <div className="toast" role="status">
+            <Check size={16} />
+            {toast}
+          </div>
+        )}
+        {dialog === "appearance" && (
+          <AppearanceDialog
+            state={desktop}
+            onSave={desktop.save}
+            onClose={() => setDialog(null)}
+          />
+        )}
+        {palette && (
+          <CommandPalette
+            onClose={() => setPalette(false)}
+            onCommand={(command) => {
+              setPalette(false);
+              setTimeout(() => commandRef.current(command), 0);
+            }}
+          />
+        )}
+        {globalSearch && (
+          <InvestigationSearch
+            project={boardProject!}
+            research={research}
+            pedigree={pedigree}
+            onRecord={openBoardRecord}
+            onClose={() => setGlobalSearch(false)}
+            onCard={focusSource}
+            onPassage={(p) =>
+              setReader({
+                sourceId: p.sourceId,
+                versionId: p.versionId,
+                passageId: p.id,
               })
-              .catch(fail);
-          }}
-        />
-      )}
-      {dialog === "project" && (
-        <ProjectDialog
-          project={project}
-          onClose={() => setDialog(null)}
-          onSave={(title, question) => {
-            boardChange((p) => ({ ...p, title, question }));
-            setDialog(null);
-          }}
-        />
-      )}
-      {dialog === "new" && (
-        <Modal
-          title="Start a new investigation"
-          onClose={() => setDialog(null)}
-        >
-          <p>
-            Your current investigation and attachments stay in the local project
-            library. A recovery archive is also saved before switching.
-          </p>
-          <p className="muted">
-            Use Project library to return to an investigation. Export a portable
-            project to keep a copy elsewhere.
-          </p>
-          <div className="modal-actions">
-            <button className="button quiet" onClick={exportProject}>
-              <Download size={15} />
-              Export current project
-            </button>
-            <button
-              disabled={busy}
-              className="button primary"
-              onClick={() => newOrOpen("new")}
-            >
-              Create new board
-            </button>
-          </div>
-        </Modal>
-      )}
-      {dialog === "delete" && selectedCard && (
-        <Modal
-          title="Remove this research item?"
-          onClose={() => setDialog(null)}
-        >
-          <p>
-            “{selectedCard.title}” and its{" "}
-            {
-              project.connections.filter(
-                (c) => c.source === selected || c.target === selected,
-              ).length
-            }{" "}
-            connections will be removed from this board. You can undo this
-            change.
-          </p>
-          <div className="modal-actions">
-            <button className="button quiet" onClick={() => setDialog(null)}>
-              Keep item
-            </button>
-            <button
-              className="button danger"
-              onClick={() => {
-                boardChange((p) => ({
-                  ...p,
-                  cards: p.cards.filter((c) => c.id !== selected),
-                  connections: p.connections.filter(
-                    (c) => c.source !== selected && c.target !== selected,
+            }
+            onReport={(id) => {
+              setTab("releaser");
+              setReportRequest({ id, key: Date.now() });
+            }}
+            onEvidence={(id) => {
+              setReader(undefined);
+              setTab("collector");
+              setResearchView("evidence");
+              setClaimRequest({ id, key: Date.now() });
+            }}
+          />
+        )}
+        {dialog === "add" && !outputWindow && (
+          <BoardItemPicker
+            key={project.id}
+            project={project}
+            research={research}
+            pedigree={pedigree || emptyPedigreeState()}
+            onClose={() => setDialog(null)}
+            onAddReference={addBoardReference}
+            onAddBasic={addCard}
+            onImport={() => {
+              void importFiles();
+            }}
+            onCreateRecord={createBoardRecord}
+          />
+        )}
+        {dialog === "edit" &&
+          selectedCard &&
+          !selectedPresentation?.reference && (
+            <CardDialog
+              initial={selectedCard}
+              onClose={() => setDialog(null)}
+              onImport={importFiles}
+              onSaveMethod={async () => {}}
+              onSave={(values) => {
+                boardChange((current) => ({
+                  ...current,
+                  cards: current.cards.map((card) =>
+                    card.id === selected
+                      ? {
+                          ...card,
+                          ...values,
+                          updatedAt: new Date().toISOString(),
+                        }
+                      : card,
                   ),
                 }));
-                setSelected(null);
                 setDialog(null);
               }}
-            >
-              Remove item
-            </button>
-          </div>
-        </Modal>
-      )}
-      {library && (
-        <ProjectLibrary
-          currentId={project.id}
-          onClose={() => setLibrary(false)}
-          onSwitch={switchProject}
-          onError={fail}
-        />
-      )}
-      {areas && (
-        <AreasDialog
-          project={project}
-          onClose={() => setAreas(false)}
-          onSave={(groups) => {
-            boardChange((p) => ({ ...p, groups }));
-            setAreas(false);
-          }}
-        />
-      )}
-      {dialog === "help" && (
-        <Modal
-          title="From fragments to understanding"
-          subtitle="One workspace. Two complementary ways of thinking."
-          onClose={() => setDialog(null)}
-          wide
-        >
-          <div className="guide-brand">
-            <img
-              className="acadia-logo guide-logo"
-              src={acadiaLogo}
-              alt="Acadia"
             />
-          </div>
-          <div className="guide-grid">
-            <section>
-              <Network size={25} />
-              <h3>The Collector</h3>
-              <p>
-                Add notes, questions, hypotheses, and links. Import files or
-                drop them onto the canvas. Paste text or a URL directly onto the
-                board.
+          )}
+        {!outputWindow && insightTarget && (
+          <ItemInsightDialog
+            key={`${project.id}:${insightTarget.kind}:${insightTarget.id}:${insightTarget.versionId || ""}`}
+            project={project}
+            research={research}
+            target={insightTarget}
+            beforeRun={async () => {
+              const projectId = project.id;
+              window.dispatchEvent(new Event("acadia:flush-report"));
+              await savePromise.current;
+              if (latest.current?.id !== projectId)
+                throw new Error(
+                  "The active investigation changed. Reopen the item to summarize it.",
+                );
+              await api().save(latest.current);
+              if (latest.current?.id !== projectId)
+                throw new Error(
+                  "The active investigation changed. Reopen the item to summarize it.",
+                );
+            }}
+            onClose={() => setInsightTarget(undefined)}
+            onCitation={(citation) => {
+              setInsightTarget(undefined);
+              openCitation(citation);
+            }}
+            onSettings={() => {
+              setInsightTarget(undefined);
+              setDialog("settings");
+            }}
+            onEvidence={(id) => {
+              setInsightTarget(undefined);
+              setReader(undefined);
+              setTab("collector");
+              setResearchView("evidence");
+              setClaimRequest({ id, key: Date.now() });
+            }}
+          />
+        )}
+        {edge && (
+          <ConnectionDialog
+            connection={edge}
+            project={boardProject!}
+            onClose={() => setEdge(null)}
+            onDelete={() => {
+              boardChange((p) => ({
+                ...p,
+                connections: p.connections.filter((c) => c.id !== edge.id),
+              }));
+              setEdge(null);
+            }}
+            onSave={(relation) => {
+              boardChange((p) => ({
+                ...p,
+                connections: p.connections.map((c) =>
+                  c.id === edge.id ? { ...c, relation } : c,
+                ),
+              }));
+              setEdge(null);
+            }}
+          />
+        )}
+        {dialog === "settings" && (
+          <SettingsDialog
+            settings={
+              project.privacy?.provider
+                ? { ...settings, ...project.privacy }
+                : { provider: "offline", endpoint: "", model: "" }
+            }
+            privacy={project.privacy || { mode: "local" }}
+            onPrivacy={(privacy) =>
+              change(
+                (p) =>
+                  p.id === project.id
+                    ? { ...p, privacy, updatedAt: new Date().toISOString() }
+                    : p,
+                false,
+              )
+            }
+            onClose={() => setDialog(null)}
+            onSave={async (s) => {
+              const saved = await api().saveSettings(s);
+              if (latest.current?.id !== project.id) return;
+              setSettings(saved);
+              change(
+                (p) =>
+                  p.id !== project.id
+                    ? p
+                    : {
+                        ...p,
+                        privacy: {
+                          mode: p.privacy?.mode || "local",
+                          provider: saved.provider,
+                          endpoint: saved.endpoint,
+                          model: saved.model,
+                        },
+                      },
+                false,
+              );
+              setToast("Research engine saved");
+            }}
+          />
+        )}
+        {dialog === "display" && (
+          <DisplayDialog
+            displays={displays}
+            onClose={() => setDialog(null)}
+            onOpen={(id) => {
+              api()
+                .openReleaser(id)
+                .then(() => {
+                  setDialog(null);
+                  setToast("Releaser display opened");
+                })
+                .catch(fail);
+            }}
+          />
+        )}
+        {dialog === "project" && (
+          <ProjectDialog
+            project={project}
+            onClose={() => setDialog(null)}
+            onSave={(title, question) => {
+              boardChange((p) => ({ ...p, title, question }));
+              setDialog(null);
+            }}
+          />
+        )}
+        {dialog === "new" && (
+          <Modal
+            title="Start a new investigation"
+            onClose={() => setDialog(null)}
+          >
+            <p>
+              Your current investigation and attachments stay in the local
+              project library. A recovery archive is also saved before
+              switching.
+            </p>
+            <p className="muted">
+              Use Project library to return to an investigation. Export a
+              portable project to keep a copy elsewhere.
+            </p>
+            <div className="modal-actions">
+              <button className="button quiet" onClick={exportProject}>
+                <Download size={15} />
+                Export current project
+              </button>
+              <button
+                disabled={busy}
+                className="button primary"
+                onClick={() => newOrOpen("new")}
+              >
+                Create new board
+              </button>
+            </div>
+          </Modal>
+        )}
+        {dialog === "delete" && selectedCard && (
+          <Modal
+            title="Remove this research item?"
+            onClose={() => setDialog(null)}
+          >
+            <p>
+              “{selectedCard.title}” and its{" "}
+              {
+                project.connections.filter(
+                  (c) => c.source === selected || c.target === selected,
+                ).length
+              }{" "}
+              connections will be removed from this board. You can undo this
+              change.
+            </p>
+            {selectedPresentation?.reference && (
+              <p className="subtle-note">
+                The underlying research record and its history will remain
+                saved.
               </p>
-              <p>
-                Drag cards to arrange your thinking. Join the right handle of
-                one card to the left handle of another. Click a connection to
-                describe what it means.
-              </p>
-              <p>
-                Use two fingers to pan, pinch to zoom, or enable the hand tool
-                for a touchscreen. Fit board brings every card back into view.
-              </p>
-            </section>
-            <section>
-              <Sparkles size={25} />
-              <h3>The Releaser</h3>
-              <p>
-                Turn your collected text into a hypothesis, research plan,
-                whitepaper, gap analysis, or needs analysis. Follow source
-                references back to the board.
-              </p>
-              <p>
-                The offline engine organizes evidence without AI. Configure a
-                local Ollama model or compatible API for AI synthesis. Review
-                generated claims before use.
-              </p>
-              <p>
-                Present creates a separate output window for a second monitor.
-                Export releases as Markdown, DOCX, or PDF.
-              </p>
-            </section>
-          </div>
-          <p className="settings-note">
-            Sources stores complete document passages and dated website
-            captures. Run local English OCR for scanned pages. Evidence
-            distinguishes support from contradictions; Tasks track gaps. Approve
-            each external search in Discover. Save a report revision and release
-            it explicitly to show it on the second display. Export editable
-            DOCX, PDF, or Markdown.
-          </p>
-          <div className="modal-actions">
-            <button className="button primary" onClick={() => setDialog(null)}>
-              Back to research
-            </button>
-          </div>
-        </Modal>
-      )}
-    </div>
+            )}
+            <div className="modal-actions">
+              <button className="button quiet" onClick={() => setDialog(null)}>
+                Keep item
+              </button>
+              <button
+                className="button danger"
+                onClick={() => {
+                  boardChange((p) => ({
+                    ...p,
+                    cards: p.cards.filter((c) => c.id !== selected),
+                    connections: p.connections.filter(
+                      (c) => c.source !== selected && c.target !== selected,
+                    ),
+                  }));
+                  setSelected(null);
+                  setDialog(null);
+                }}
+              >
+                Remove item
+              </button>
+            </div>
+          </Modal>
+        )}
+        {library && (
+          <ProjectLibrary
+            currentId={project.id}
+            onClose={() => setLibrary(false)}
+            onSwitch={switchProject}
+            onError={fail}
+          />
+        )}
+        {areas && (
+          <AreasDialog
+            project={project}
+            onClose={() => setAreas(false)}
+            onSave={(groups) => {
+              boardChange((p) => ({ ...p, groups }));
+              setAreas(false);
+            }}
+          />
+        )}
+        {dialog === "help" && (
+          <Modal
+            title="From fragments to understanding"
+            subtitle="One workspace. Two complementary ways of thinking."
+            onClose={() => setDialog(null)}
+            wide
+          >
+            <div className="guide-brand">
+              <img
+                className="acadia-logo guide-logo"
+                src={acadiaLogo}
+                alt="Acadia"
+              />
+            </div>
+            <div className="guide-grid">
+              <section>
+                <Network size={25} />
+                <h3>The Collector</h3>
+                <p>
+                  Add notes, questions, hypotheses, and links. Import files or
+                  drop them onto the canvas. Paste text or a URL directly onto
+                  the board.
+                </p>
+                <p>
+                  Drag cards to arrange your thinking. Join the right handle of
+                  one card to the left handle of another. Click a connection to
+                  describe what it means.
+                </p>
+                <p>
+                  Use two fingers to pan, pinch to zoom, or enable the hand tool
+                  for a touchscreen. Fit board brings every card back into view.
+                </p>
+              </section>
+              <section>
+                <Sparkles size={25} />
+                <h3>The Releaser</h3>
+                <p>
+                  Turn your collected text into a hypothesis, research plan,
+                  whitepaper, gap analysis, or needs analysis. Follow source
+                  references back to the board.
+                </p>
+                <p>
+                  The offline engine organizes evidence without AI. Configure a
+                  local Ollama model or compatible API for AI synthesis. Review
+                  generated claims before use.
+                </p>
+                <p>
+                  Present creates a separate output window for a second monitor.
+                  Export releases as Markdown, DOCX, or PDF.
+                </p>
+              </section>
+            </div>
+            <p className="settings-note">
+              Sources stores complete document passages and dated website
+              captures. Run local English OCR for scanned pages. Evidence
+              distinguishes support from contradictions; Tasks track gaps.
+              Approve each external search in Discover. Save a report revision
+              and release it explicitly to show it on the second display. Export
+              editable DOCX, PDF, or Markdown.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="button primary"
+                onClick={() => setDialog(null)}
+              >
+                Back to research
+              </button>
+            </div>
+          </Modal>
+        )}
+      </div>
+    </BoardMappingProvider>
   );
 }
 function ProjectDialog({

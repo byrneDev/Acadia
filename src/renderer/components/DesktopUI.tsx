@@ -8,6 +8,8 @@ import type {
 import type { Project } from "../../shared/types";
 import type { ResearchState, SearchHit } from "../../shared/research";
 import { Modal } from "./Dialogs";
+import type { PedigreeState } from "../../shared/pedigree";
+import type { BoardReference } from "../../shared/board";
 
 const media = (query: string) => window.matchMedia(query);
 const fallback = (): DesktopState => ({
@@ -176,7 +178,16 @@ export function AppearanceDialog({
 
 export interface WorkspaceNavigation {
   tab: "collector" | "releaser";
-  view: "board" | "brief" | "sources" | "evidence" | "methods" | "tasks" | "inquiry" | "discovery";
+  view:
+    | "board"
+    | "brief"
+    | "sources"
+    | "evidence"
+    | "methods"
+    | "tasks"
+    | "inquiry"
+    | "discovery"
+    | "flow";
   selected: string | null;
   boardItems: boolean;
 }
@@ -203,6 +214,7 @@ export function readNavigation(project: Project): WorkspaceNavigation {
         "discovery",
         "brief",
         "methods",
+        "flow",
       ].includes(s.view)
         ? s.view
         : "board",
@@ -425,6 +437,8 @@ export function InvestigationSearch({
   onPassage,
   onReport,
   onEvidence,
+  pedigree,
+  onRecord,
   onClose,
 }: {
   project: Project;
@@ -433,6 +447,8 @@ export function InvestigationSearch({
   onPassage: (p: SearchHit) => void;
   onReport: (id: string) => void;
   onEvidence: (id: string) => void;
+  pedigree?: PedigreeState;
+  onRecord?: (reference: BoardReference) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -477,7 +493,50 @@ export function InvestigationSearch({
         .slice(0, 10)
     : [];
   const claims = ["all", "evidence"].includes(scope)
-    ? research.claims.filter((c) => match(c.title)).slice(0, 15)
+    ? research.claims
+        .filter((c) => match(`${c.title} ${c.itemReview?.notes || ""}`))
+        .slice(0, 15)
+    : [];
+  const linkedRecords: {
+    reference: BoardReference;
+    title: string;
+    label: string;
+    detail: string;
+  }[] = ["all", "records"].includes(scope)
+    ? [
+        ...research.tasks.map((record) => ({
+          reference: { kind: "task" as const, id: record.id },
+          title: record.title,
+          label: "Research task",
+          detail: record.question,
+        })),
+        ...(pedigree?.assumptions || []).map((record) => ({
+          reference: { kind: "assumption" as const, id: record.id },
+          title: record.statement,
+          label: "Assumption",
+          detail: record.basis,
+        })),
+        ...(pedigree?.gaps || []).map((record) => ({
+          reference: { kind: "gap" as const, id: record.id },
+          title: record.title,
+          label: "Research gap",
+          detail: record.missingInformation,
+        })),
+        ...(pedigree?.decisions || []).map((record) => ({
+          reference: { kind: "decision" as const, id: record.id },
+          title: record.title,
+          label: "Decision",
+          detail: record.rationale,
+        })),
+        ...(pedigree?.methods || []).map((record) => ({
+          reference: { kind: "method" as const, id: record.id },
+          title: record.title,
+          label: "Research method",
+          detail: record.objective,
+        })),
+      ]
+        .filter((record) => match(`${record.title} ${record.detail}`))
+        .slice(0, 25)
     : [];
   const choose = (f: () => void) => {
     onClose();
@@ -512,6 +571,7 @@ export function InvestigationSearch({
           <option value="sources">Source passages</option>
           <option value="evidence">Evidence</option>
           <option value="reports">Reports</option>
+          <option value="records">Tasks, assumptions, gaps & decisions</option>
         </select>
       </div>
       <div className="search-results">
@@ -535,6 +595,17 @@ export function InvestigationSearch({
             <strong>{c.title}</strong>
           </button>
         ))}
+        {onRecord &&
+          linkedRecords.map((record) => (
+            <button
+              key={`${record.reference.kind}:${record.reference.id}`}
+              onClick={() => choose(() => onRecord(record.reference))}
+            >
+              <small>{record.label}</small>
+              <strong>{record.title}</strong>
+              <span>{record.detail.slice(0, 160)}</span>
+            </button>
+          ))}
         {reports.map((o) => (
           <button key={o.id} onClick={() => choose(() => onReport(o.id))}>
             <small>Report</small>
@@ -549,7 +620,8 @@ export function InvestigationSearch({
               : !cards.length &&
                   !hits.length &&
                   !claims.length &&
-                  !reports.length
+                  !reports.length &&
+                  !linkedRecords.length
                 ? "No matching research."
                 : "Source results open the saved passage."}
         </p>

@@ -11,8 +11,10 @@ import {
   StickyNote,
   ArrowUpRight,
   Layers,
+  Sparkles,
 } from "lucide-react";
 import type { ResearchCard } from "../../shared/types";
+import type { BoardPresentation } from "./boardPresentation";
 export const cardIcons = {
   note: StickyNote,
   question: CircleHelp,
@@ -23,13 +25,24 @@ export const cardIcons = {
   audio: Music2,
   video: Film,
 };
-export type BoardNode = Node<{ card: ResearchCard }, "research">;
+export type BoardNode = Node<
+  {
+    card: ResearchCard;
+    presentation?: BoardPresentation;
+    onOpen?: (id: string) => void;
+    onSummarize?: (id: string) => void;
+  },
+  "research"
+>;
 export default memo(function ResearchNode({
   data,
   selected,
 }: NodeProps<BoardNode>) {
   const card = data.card,
-    Icon = card.methodId ? Layers : cardIcons[card.kind];
+    Icon =
+      data.presentation?.reference || card.methodId
+        ? Layers
+        : cardIcons[card.kind];
   return (
     <article
       className={`research-card kind-${card.kind} ${selected ? "is-selected" : ""}`}
@@ -42,9 +55,28 @@ export default memo(function ResearchNode({
       <div className="card-heading">
         <span>
           <Icon size={13} />
-          {card.methodId ? "Research method" : card.kind}
+          {data.presentation?.label ||
+            (card.methodId ? "Research method" : card.kind)}
         </span>
-        <span className={`status-dot ${card.status}`} title={card.status} />
+        <span className="card-heading-actions">
+          {data.onSummarize && (
+            <button
+              type="button"
+              className="card-ai-action nodrag nopan"
+              aria-label={`AI summary for ${card.title}`}
+              title="AI summary & research advice"
+              onClick={(event) => {
+                event.stopPropagation();
+                data.onSummarize?.(card.id);
+              }}
+            >
+              <Sparkles size={14} aria-hidden="true" />
+            </button>
+          )}
+          {!data.presentation?.reference && (
+            <span className={`status-dot ${card.status}`} title={card.status} />
+          )}
+        </span>
       </div>
       {card.kind === "image" && card.assetId && (
         <img
@@ -63,6 +95,26 @@ export default memo(function ResearchNode({
             ? "Add notes about this source."
             : "Open to add your observations.")}
       </p>
+      {data.presentation?.reference && (
+        <div className="linked-card-info">
+          <span>
+            {data.presentation.status}
+            {data.presentation.historical ? " · historical evidence" : ""}
+          </span>
+          <button
+            type="button"
+            className="nodrag nopan"
+            disabled={data.presentation.unavailable}
+            aria-label={`Open linked ${data.presentation.label.toLowerCase()}: ${card.title}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              data.onOpen?.(card.id);
+            }}
+          >
+            Open record <ArrowUpRight size={13} />
+          </button>
+        </div>
+      )}
       {card.url && (
         <div className="card-url">
           <ArrowUpRight size={12} />

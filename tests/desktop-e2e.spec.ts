@@ -290,6 +290,20 @@ test("native appearance and window geometry survive restart while audience mutat
     );
     expect(state.preferences).toEqual({ theme: "light", density: "compact" });
     expect(state.appearance.theme).toBe("light");
+    const initialBounds = await session.app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find(
+        (entry) => !entry.webContents.getURL().endsWith("#releaser"),
+      )!;
+      const bounds = window.getNormalBounds();
+      // On a small hosted display the requested geometry can already equal
+      // the live bounds. Persistence must not depend on a resize event.
+      window.setBounds(bounds);
+      return bounds;
+    });
+    const savedBounds = async () =>
+      JSON.parse(await readFile(join(profile, "desktop.json"), "utf8"))
+        .windows?.collector?.bounds;
+    await expect.poll(savedBounds).toEqual(initialBounds);
     const bounds = await session.app.evaluate(({ BrowserWindow, screen }) => {
       const window = BrowserWindow.getAllWindows().find(
         (entry) => !entry.webContents.getURL().endsWith("#releaser"),
@@ -304,13 +318,7 @@ test("native appearance and window geometry survive restart while audience mutat
       });
       return window.getNormalBounds();
     });
-    await expect
-      .poll(
-        async () =>
-          JSON.parse(await readFile(join(profile, "desktop.json"), "utf8"))
-            .windows?.collector?.bounds,
-      )
-      .toEqual(bounds);
+    await expect.poll(savedBounds).toEqual(bounds);
     const menu = await session.app.evaluate(({ Menu }) => {
       const items = Menu.getApplicationMenu()!;
       return [

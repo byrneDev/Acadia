@@ -2,7 +2,21 @@
 
 Acadia follows a 0.x early-access release series. Entries describe application changes; platform validation is recorded separately in each release. Earlier versions were distributed as local development packages before the public repository.
 
+## 0.5.0
+
+- Expanded Add item into a grouped, searchable research-to-delivery picker, with canonical linked cards for sources, historical passages, briefs, findings, accepted Reviewer Notes, assumptions, tasks, methods, gaps, decisions, reports and delivery plans.
+- Added manual revisioned gaps and decisions, record-aware navigation and search, duplicate-placement focusing, historical-version labels, and placement-only removal. Linked analytical records do not become additional sources.
+- Added informs, identifies gap, addresses, depends on and produces relationships without changing evidence assessments or task state.
+- Introduced portable archive format v4, requiring Acadia v0.5 or later, with v1–v3 import, recoverable database migration, and retained historical citations to legacy method sources.
+- Added on-demand AI summaries and research-use advice for collected cards and saved source versions, with exact passage references, coverage limits, persistent summary history, and project-model privacy controls.
+- Added human review of item summaries: edit proposed Reviewer Notes, explicitly accept them, and retain the reviewed text as linked evidence with historical citations and acceptance provenance. Original notes remain intact; acceptance does not automatically assert evidential support.
+- Kept item advice aligned with canonical linked records, exact historical passages and source exclusions. Changed inputs prompt reconsideration; invalid references or model responses leave existing research intact.
+- Persisted the initial window geometry even when a small display constrains the window and the user never resizes it, so the next launch can restore a saved position.
+- Extended desktop and storage regression coverage for the complete research-to-delivery chain. See [v0.5 validation](docs/VALIDATION-v0.5.md) for source, package and platform results.
+
 ## 0.4.0
+
+Source milestone. These changes were pushed to the public repository; there was no separate v0.4.0 GitHub binary release. They are included in v0.5.0.
 
 - Added versioned research briefs, source appraisals, confirmed shared origins, finding assessments and an assumptions register. Citation integrity, evidence support and qualitative confidence remain separate.
 - Added competing-hypotheses, SWOT, root-cause, risk and technology-readiness worksheets with shared evidence, assumptions and gap tasks.

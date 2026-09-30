@@ -8,6 +8,10 @@ Acadia's direction is a research workspace in which a reader can follow a findin
 - Located document passages, source versions, extraction coverage, local English OCR, and portable projects.
 - Explicit local/cloud analysis configuration, optional Brave search, and recorded analysis provenance.
 - Editable cited reports, proposed section revisions, immutable snapshots, separate released display, and DOCX/PDF/Markdown exports.
+- Versioned briefs/appraisals, shared-origin review, finding assessments, assumptions, five manual research methods and explicit AI challenge proposals.
+- Per-item AI summaries accepted by the researcher into Reviewer Notes with historical evidence provenance.
+- Searchable research-to-delivery board items, canonical linked cards, revisioned gaps and decisions, and portable archive format v4.
+- Deliverable project plans, editable work packages, local Monday/Jira/Planner handoffs and Power BI data exports.
 - Distribution targets for Ubuntu 24.04 x64, Apple Silicon macOS, and Windows x64.
 
 The [changelog](../CHANGELOG.md) and [release notes](https://github.com/byrneDev/Acadia/releases) distinguish implemented behavior from the platform combinations actually validated.
@@ -32,6 +36,6 @@ Broaden extraction fixtures, inspect OCR failure modes, and profile long-documen
 
 ## Deliberately deferred
 
-Remote collaboration, cloud synchronization, autonomous background investigations, audio/video transcription, quantitative dataset analysis, external publishing, and automatic application updates are outside the current release. Additional OCR languages and architectures require their own packaging, accuracy, and usability validation before becoming supported targets.
+Remote collaboration, cloud synchronization, autonomous background investigations, audio/video transcription, quantitative dataset analysis, full systematic reviews, weighted decision optimization, external publishing, and automatic application updates are outside the current release. Individual work-package cards, automatic board layout and a dedicated experiment/protocol editor are also deferred. Additional OCR languages and architectures require their own packaging, accuracy, and usability validation before becoming supported targets.
 
 To propose work, open an [issue](https://github.com/byrneDev/Acadia/issues) explaining the research task, the limitation you encounter, and an example of success. An accepted issue or pull request should define concrete behavior and verification before implementation expands the scope.

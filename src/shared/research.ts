@@ -6,10 +6,35 @@ import type {
   ResearchOutput,
   ProjectPlanContext,
 } from "./types";
-import type { ModelRequestAudit, RetrievalManifest, QuoteAssociation } from "./pedigree-analysis";
+import type {
+  ModelRequestAudit,
+  RetrievalManifest,
+  QuoteAssociation,
+} from "./pedigree-analysis";
 import type { ChallengeTarget } from "./pedigree-analysis";
 import type { DeliveryPlan } from "./pmis";
-import type { ResearchBrief, SourceAppraisal, SourceOrigin, FindingAssessment, ResearchAssumption, MethodWorksheet, ReviewIssue, PedigreeState, PedigreeEntityKind, PedigreeRevision, PedigreeSnapshot } from "./pedigree";
+import type { BoardReference } from "./board";
+import type {
+  ItemInsight,
+  ItemInsightTarget,
+  ItemInsightReview,
+  ItemInsightAcceptance,
+} from "./item-insight";
+import type {
+  ResearchBrief,
+  SourceAppraisal,
+  SourceOrigin,
+  FindingAssessment,
+  ResearchAssumption,
+  MethodWorksheet,
+  ReviewIssue,
+  PedigreeState,
+  PedigreeEntityKind,
+  PedigreeRevision,
+  PedigreeSnapshot,
+  ResearchGap,
+  ResearchDecision,
+} from "./pedigree";
 export type Inclusion = "include" | "pin" | "exclude";
 export type ExtractionStatus =
   | "queued"
@@ -30,6 +55,8 @@ export interface SourceRecord {
   currentVersionId: string;
   inclusion: Inclusion;
   duplicateOf?: string;
+  /** Historical text from an analytical board placement; never independent evidence. */
+  derived?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -103,6 +130,7 @@ export interface ResearchClaim {
   links: EvidenceLink[];
   cardId?: string;
   updatedAt: string;
+  itemReview?: ItemInsightReview;
 }
 export interface ResearchTask {
   id: string;
@@ -130,12 +158,14 @@ export interface ResearchJob {
     | "answer"
     | "revision"
     | "challenge"
-    | "method-assistance";
+    | "method-assistance"
+    | "item-summary";
   label: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   progress: number;
   message: string;
   sourceId?: string;
+  itemTarget?: ItemInsightTarget;
   result?: unknown;
   createdAt: string;
   updatedAt: string;
@@ -162,6 +192,7 @@ export interface AnalysisRun {
   retrieval?: RetrievalManifest;
   quotationAssociations?: QuoteAssociation[];
   pedigreeSnapshotId?: string;
+  itemInsight?: ItemInsight;
 }
 export interface ResearchAnswer {
   answer: string;
@@ -266,6 +297,13 @@ export interface SectionProposal {
   runId?: string;
 }
 export interface ResearchAPI {
+  saveGap(value: ResearchGap): Promise<ResearchGap>;
+  saveDecision(value: ResearchDecision): Promise<ResearchDecision>;
+  addBoardReference(
+    reference: BoardReference,
+  ): Promise<{ project: Project; cardId: string }>;
+  acceptItemInsight(input: ItemInsightAcceptance): Promise<ResearchClaim>;
+  summarizeItem(target: ItemInsightTarget): Promise<ResearchJob>;
   pedigreeState(): Promise<PedigreeState>;
   saveResearchBrief(value: ResearchBrief): Promise<ResearchBrief>;
   saveSourceAppraisal(value: SourceAppraisal): Promise<SourceAppraisal>;
@@ -274,7 +312,10 @@ export interface ResearchAPI {
   saveAssumption(value: ResearchAssumption): Promise<ResearchAssumption>;
   saveMethod(value: MethodWorksheet): Promise<MethodWorksheet>;
   saveReviewIssue(value: ReviewIssue): Promise<ReviewIssue>;
-  pedigreeRevisions(kind: PedigreeEntityKind, id: string): Promise<PedigreeRevision[]>;
+  pedigreeRevisions(
+    kind: PedigreeEntityKind,
+    id: string,
+  ): Promise<PedigreeRevision[]>;
   createPedigreeSnapshot(): Promise<PedigreeSnapshot>;
   getPedigreeSnapshot(id: string): Promise<PedigreeSnapshot>;
   challengeAnalysis(target: ChallengeTarget): Promise<ResearchJob>;

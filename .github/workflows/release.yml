@@ -35,6 +35,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
       publish: ${{ steps.version.outputs.publish }}
+      notes: ${{ steps.version.outputs.notes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,24 +44,11 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
-      - name: Require the tag to match package.json
+      - name: Validate version, release notes, and bundled resource declarations
         id: version
         env:
           REQUEST_PUBLISH: ${{ github.event_name == 'push' || inputs.publish == true }}
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const {version} = require('./package.json');
-          const lock = require('./package-lock.json');
-          if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('Invalid release version.');
-          if (lock.version !== version || lock.packages[''].version !== version) throw new Error('Package and lockfile versions differ.');
-          const tag = `v${version}`;
-          const publish = process.env.REQUEST_PUBLISH === 'true';
-          if ((publish || process.env.GITHUB_REF_TYPE === 'tag') && process.env.GITHUB_REF !== `refs/tags/${tag}`) {
-            throw new Error(`Select or push the existing ${tag} tag. Branch dispatches only build artifacts.`);
-          }
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ntag=${tag}\npublish=${publish}\n`);
-          NODE
+        run: node .github/scripts/release-artifacts.cjs metadata
 
   package:
     name: Package and test (${{ matrix.platform }})
@@ -196,6 +184,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out the exact validated source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: verified-distribution
@@ -209,39 +202,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
           RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+          RELEASE_NOTES: ${{ needs.metadata.outputs.notes }}
         run: |
-          cat > release-notes.md <<'NOTES'
-          Acadia brings the Collector research canvas and Releaser report workspace to Ubuntu, macOS, and Windows.
-
-          ### Included in this release
-
-          - A smoother native desktop workspace with system/light/dark appearance, density controls, platform menus and shortcuts, command search, and a focused source reader and report editor.
-          - Versioned research briefs, exact-version source appraisals, shared-origin review, finding assessments and assumptions; supporting evidence, contradictions and unassessed independence remain distinct.
-          - Five editable methods: competing hypotheses, SWOT, root causes, risk and technology readiness, with linked evidence and follow-up tasks.
-          - Explicit AI challenge proposals, balanced retrieval/audit records, quotation checks and frozen report pedigree. Review proposals before applying them; citation validity does not establish claim support.
-          - Deliverable project plans with editable work packages and local Monday/Jira/Planner handoffs, plus linked Power BI tables and import guidance.
-          - Portable project format v3 with recovery backups and v1/v2 import support; existing document/OCR, approved web discovery, report exports and private released-display behavior remain available.
-
-          ### Downloads and installation
-
-          Ubuntu 24.04 x64: use the `.deb` installer, or the AppImage where the desktop environment supports its sandbox requirements. macOS Apple Silicon: unzip `Acadia.app`. Windows x64: run the `.exe` installer.
-
-          Start with the [quick-start guide](https://github.com/byrneDev/Acadia/blob/main/docs/QUICK-START.md), [Ubuntu guide](https://github.com/byrneDev/Acadia/blob/main/docs/LINUX.md), and [local AI setup](https://github.com/byrneDev/Acadia/blob/main/docs/LOCAL-AI.md). A fictional investigation is bundled for exploration.
-
-          ### Validation and limits
-
-          This automated publication path requires type checks, the research/unit suite, and native desktop scenarios against each packaged application on Ubuntu, macOS, and Windows. The workflow verifies the complete distribution and its checksums before uploading. Consult the workflow run for this tag: local cross-built packages and earlier release results do not establish native validation for this build.
-
-          The [v0.4 validation record](https://github.com/byrneDev/Acadia/blob/v0.4.0/docs/VALIDATION-v0.4.md) separates functional tests from the recorded local-model evaluation. In that single synthetic qwen3.5:9b evaluation, the decision brief was accepted; the challenge proposal failed its schema and an abstaining answer failed exact-quotation validation. No general model-accuracy pass is claimed.
-
-          Packages are unsigned; the macOS application is not notarized. Automated native scenarios include separate output windows and simulated touch; physical multi-monitor, touchscreen, mixed-DPI and assistive-technology checks remain separate. Power BI Desktop and live PMIS tenant imports require their own checks; Acadia's exports do not connect to those services automatically.
-
-          Acadia remains an early-access 0.x application. Review OCR and AI findings against the sources, and keep project backups. Verify downloads against SHA256SUMS.txt. Local AI models and credentials are not included.
-          NOTES
           shopt -s nullglob
           assets=(release-assets/*.deb release-assets/*.AppImage release-assets/*.zip release-assets/*.exe release-assets/SHA256SUMS.txt)
           if [[ ${#assets[@]} -ne 5 ]]; then
             echo "Expected four native downloads and one combined checksum file." >&2
             exit 1
           fi
-          gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --title "Acadia $RELEASE_VERSION" --generate-notes --notes-file release-notes.md
+          gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --title "Acadia $RELEASE_VERSION" --generate-notes --notes-file "$RELEASE_NOTES"

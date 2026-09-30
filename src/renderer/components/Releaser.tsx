@@ -70,6 +70,7 @@ import {
   writeReportWorkspace,
 } from "./report-workspace-state";
 import "./Releaser.css";
+import { AddToBoardButton } from "./BoardMappingContext";
 
 interface ReleaserProps {
   project: Project;
@@ -78,6 +79,8 @@ interface ReleaserProps {
   onSettings: () => void;
   readOnly?: boolean;
   requestNewReport?: number;
+  requestNewDeliveryPlan?: number;
+  onDeliveryPlanRequestHandled?: () => void;
   onRequestHandled?: () => void;
   requestedReport?: { id: string; key: number };
   research?: ResearchState | null;
@@ -150,6 +153,8 @@ export default function Releaser({
   onSettings,
   readOnly = false,
   requestNewReport,
+  requestNewDeliveryPlan: newDeliveryPlanRequest,
+  onDeliveryPlanRequestHandled,
   onRequestHandled,
   requestedReport,
   research: providedResearch,
@@ -369,6 +374,16 @@ export default function Releaser({
       onRequestHandled?.();
     }
   }, [requestNewReport, readOnly]);
+  useEffect(() => {
+    if (!newDeliveryPlanRequest || readOnly) return;
+    if (!selectedOutput || selectedOutput.kind === "project-plan")
+      setError(
+        "Choose an analysis report first, then use Plan a deliverable to connect its gap to the proposed work.",
+      );
+    else planDeliverable();
+    if (onDeliveryPlanRequestHandled) onDeliveryPlanRequestHandled();
+    else onRequestHandled?.();
+  }, [newDeliveryPlanRequest, readOnly]);
   useEffect(() => {
     const dialog = composer.current;
     if (!dialog || readOnly) return;
@@ -1078,6 +1093,17 @@ export default function Releaser({
               )}
             {selectedOutput && (
               <div className="release-export-actions">
+                {!readOnly && (
+                  <AddToBoardButton
+                    reference={{
+                      kind:
+                        selectedOutput.kind === "project-plan"
+                          ? "delivery-plan"
+                          : "report",
+                      id: selectedOutput.id,
+                    }}
+                  />
+                )}
                 {(["md", "docx", "pdf"] as const).map((format) => (
                   <button
                     key={format}

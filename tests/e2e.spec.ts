@@ -319,7 +319,12 @@ test("Releaser creates traceable outputs and presents only explicitly released r
   await page
     .getByRole("button", { name: "Save & release", exact: true })
     .click();
-  await page.getByRole("button", { name: /Release with limitations|Release reviewed revision/, exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: /Release with limitations|Release reviewed revision/,
+      exact: true,
+    })
+    .click();
   await expect(second.locator(".release-markdown h1")).toHaveText("Hypothesis");
   const writeDenied = await second.evaluate(async () => {
     try {
@@ -344,13 +349,21 @@ test("Releaser creates traceable outputs and presents only explicitly released r
   await page
     .getByRole("button", { name: "Save & release", exact: true })
     .click();
-  await page.getByRole("button", { name: /Release with limitations|Release reviewed revision/, exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: /Release with limitations|Release reviewed revision/,
+      exact: true,
+    })
+    .click();
   await expect(second.locator(".release-markdown h1")).toHaveText(
     "Research plan",
   );
   await second.getByRole("button", { name: "Reports and evidence" }).click();
   await expect(second.locator(".release-output-item")).toHaveCount(1);
-  await second.getByRole("button", { name: "Reports and evidence" }).click();
+  // Compact display windows overlay the toolbar; close using the visible
+  // inspector control rather than clicking a toggle behind the panel.
+  await second.getByRole("button", { name: "Close report inspector" }).click();
+  await expect(second.locator(".release-archive")).toBeHidden();
   const releaseBeforeUndo = (await project(page)).releasedOutputId;
   await page.getByRole("tab", { name: /Collector/ }).click();
   await page.getByRole("button", { name: "Undo", exact: true }).click();

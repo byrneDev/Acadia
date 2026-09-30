@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, Sparkles } from "lucide-react";
 import type { Project, ResearchCard } from "../../shared/types";
 import type {
   Inclusion,
@@ -9,6 +9,8 @@ import type {
 } from "../../shared/research";
 import { Modal } from "./Dialogs";
 import { SourcePedigree } from "./PedigreeWorkspace";
+import { ReviewerNotes } from "./ReviewerNotes";
+import { AddToBoardButton, useBoardMapping } from "./BoardMappingContext";
 import {
   PASSAGES_PER_PAGE,
   clampPassagePage,
@@ -51,6 +53,7 @@ export function SourceReader({
   onError,
   onBoard,
   onNavigate,
+  onSummarize,
   readOnly = false,
   embedded = false,
 }: {
@@ -67,9 +70,11 @@ export function SourceReader({
     versionId?: string,
     passageId?: string,
   ) => void;
+  onSummarize?: (sourceId: string, versionId?: string) => void;
   readOnly?: boolean;
   embedded?: boolean;
 }) {
+  const boardMapping = useBoardMapping();
   const [detail, setDetail] = useState<SourceDetail>();
   const [version, setVersion] = useState(versionId);
   const [draft, setDraft] = useState<EvidenceDraft>();
@@ -447,7 +452,17 @@ export function SourceReader({
                 Open original
               </button>
             )}
+            {!readOnly && boardMapping && (
+              <AddToBoardButton
+                reference={{
+                  kind: "source",
+                  id: sourceId,
+                  versionId: activeVersion,
+                }}
+              />
+            )}
             {!readOnly &&
+              !boardMapping &&
               onBoard &&
               !project.cards.some(
                 (c) => c.sourceId === sourceId || c.id === detail.source.cardId,
@@ -469,6 +484,30 @@ export function SourceReader({
                 </button>
               )}
           </div>
+          {!readOnly && onSummarize && (
+            <button
+              className="button quiet item-insight-trigger"
+              onClick={() => onSummarize(sourceId, activeVersion)}
+            >
+              <Sparkles size={16} />
+              AI summary & research advice
+            </button>
+          )}
+          {!readOnly && onNavigate && (
+            <ReviewerNotes
+              displayedVersionId={activeVersion}
+              claims={research.claims.filter(
+                (claim) => claim.itemReview?.sourceId === sourceId,
+              )}
+              onCitation={(citation) =>
+                onNavigate(
+                  citation.sourceId,
+                  citation.versionId,
+                  citation.passageId,
+                )
+              }
+            />
+          )}
           <div className={`coverage ${v?.status === "ready" ? "" : "warning"}`}>
             <strong>
               {v?.status.toUpperCase()} · {v?.processedUnits}/{v?.totalUnits}{" "}
@@ -601,6 +640,16 @@ export function SourceReader({
                     )}
                   </div>
                   <p className="passage-text">{p.text}</p>
+                  {!readOnly && (
+                    <AddToBoardButton
+                      reference={{
+                        kind: "passage",
+                        id: p.id,
+                        versionId: p.versionId,
+                      }}
+                      label="Add passage to board"
+                    />
+                  )}
                   {!readOnly && (
                     <button
                       className="text-button"

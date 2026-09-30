@@ -106,6 +106,9 @@ if (!window.acadia) {
     );
   };
   window.acadia = {
+    addBoardReference: desktopOnly,
+    saveGap: desktopOnly,
+    saveDecision: desktopOnly,
     exportProjectPlan: desktopOnly,
     exportPowerBI: desktopOnly,
     pedigreeState: desktopOnly,
@@ -121,6 +124,8 @@ if (!window.acadia) {
     getPedigreeSnapshot: desktopOnly,
     challengeAnalysis: desktopOnly,
     assistMethod: desktopOnly,
+    summarizeItem: desktopOnly,
+    acceptItemInsight: desktopOnly,
     getDesktopState: async () => desktopState(),
     saveDesktopPreferences: async (patch) => {
       if (window.location.hash === "#releaser")

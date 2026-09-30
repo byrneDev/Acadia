@@ -14,6 +14,7 @@ import {
 import { Plus, Minus, Scan, Hand, Maximize, X, Link2 } from "lucide-react";
 import type { Connection, Project, ResearchCard } from "../../shared/types";
 import ResearchNode from "./ResearchNode";
+import type { BoardPresentation } from "./boardPresentation";
 import {
   readBoardViewport,
   saveBoardViewport,
@@ -45,6 +46,11 @@ const relationColors: Record<string, string> = {
   "derived from": "var(--connection-derived, var(--text))",
   investigate: "var(--connection-investigate, var(--amber))",
   "relates to": "var(--connection-related, var(--muted))",
+  informs: "var(--phosphor)",
+  "identifies gap": "var(--amber)",
+  addresses: "var(--phosphor)",
+  "depends on": "var(--text)",
+  produces: "var(--phosphor)",
 };
 interface Props {
   project: Project;
@@ -55,6 +61,9 @@ interface Props {
   onEdge: (c: Connection) => void;
   onAdd: (x?: number, y?: number) => void;
   onDropFiles: (files: File[]) => void;
+  onSummarize?: (id: string) => void;
+  onOpen?: (id: string) => void;
+  presentations?: Record<string, BoardPresentation>;
   focusId: string | null;
   focusKey: number;
   onAreas: () => void;
@@ -70,6 +79,9 @@ function Board(props: Props) {
     onEdge,
     onAdd,
     onDropFiles,
+    onSummarize,
+    onOpen,
+    presentations,
     focusId,
     focusKey,
   } = props;
@@ -174,7 +186,12 @@ function Board(props: Props) {
           id: card.id,
           type: "research",
           position: { x: card.x, y: card.y },
-          data: { card },
+          data: {
+            card,
+            onSummarize,
+            onOpen,
+            presentation: presentations?.[card.id],
+          },
           selected: card.id === selectedId,
         })),
       ];
@@ -186,7 +203,15 @@ function Board(props: Props) {
         return existing?.type === node.type ? { ...existing, ...node } : node;
       });
     });
-  }, [project.cards, project.groups, selectedId, setNodes]);
+  }, [
+    project.cards,
+    project.groups,
+    selectedId,
+    setNodes,
+    onSummarize,
+    onOpen,
+    presentations,
+  ]);
   useEffect(() => {
     if (!focusId) return;
     const focusToken = `${focusId}:${focusKey}`;
@@ -299,6 +324,10 @@ function Board(props: Props) {
         onConnect={onConnect}
         onNodeClick={(_, n) => {
           if (n.type === "research") onSelect(n.id);
+        }}
+        onNodeDoubleClick={(_, node) => {
+          const item = presentations?.[node.id];
+          if (item?.reference && !item.unavailable) onOpen?.(node.id);
         }}
         onPaneClick={() => {
           onSelect(null);

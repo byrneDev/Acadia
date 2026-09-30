@@ -48,7 +48,8 @@ export interface SourceOrigin extends PedigreeEntityBase {
 }
 export interface FindingAssessment extends PedigreeEntityBase {
   claimId: string;
-  classification: "unassessed" | "source-assertion" | "inference" | "hypothesis";
+  classification:
+    "unassessed" | "source-assertion" | "inference" | "hypothesis";
   reasoning: string;
   assumptionIds: string[];
   confidence: "unassessed" | "low" | "moderate" | "high";
@@ -66,6 +67,26 @@ export interface ResearchAssumption extends PedigreeEntityBase {
   passageIds: string[];
   claimIds: string[];
   status: "unassessed" | "proposed" | "supported" | "challenged";
+}
+export interface ResearchGap extends PedigreeEntityBase {
+  title: string;
+  missingInformation: string;
+  importance: string;
+  resolutionCriteria: string;
+  claimIds: string[];
+  taskIds: string[];
+  passageIds: string[];
+  status: "open" | "investigating" | "resolved";
+}
+export interface ResearchDecision extends PedigreeEntityBase {
+  title: string;
+  action: string;
+  rationale: string;
+  alternatives: string;
+  claimIds: string[];
+  assumptionIds: string[];
+  outputIds: string[];
+  status: "proposed" | "made" | "reconsider";
 }
 export type MethodKind = "hypotheses" | "swot" | "root-cause" | "risk" | "trl";
 export interface MethodRowBase {
@@ -211,6 +232,8 @@ export interface PedigreeState {
   assumptions: ResearchAssumption[];
   methods: MethodWorksheet[];
   issues: ReviewIssue[];
+  gaps: ResearchGap[];
+  decisions: ResearchDecision[];
 }
 export type PedigreeEntityKind =
   | "brief"
@@ -219,7 +242,9 @@ export type PedigreeEntityKind =
   | "finding"
   | "assumption"
   | "method"
-  | "issue";
+  | "issue"
+  | "gap"
+  | "decision";
 export type PedigreeEntity =
   | ResearchBrief
   | SourceAppraisal
@@ -227,7 +252,9 @@ export type PedigreeEntity =
   | FindingAssessment
   | ResearchAssumption
   | MethodWorksheet
-  | ReviewIssue;
+  | ReviewIssue
+  | ResearchGap
+  | ResearchDecision;
 export interface PedigreeRevision {
   id: string;
   projectId: string;
@@ -259,6 +286,8 @@ export const emptyPedigreeState = (): PedigreeState => ({
   assumptions: [],
   methods: [],
   issues: [],
+  gaps: [],
+  decisions: [],
 });
 const base = (projectId: string): PedigreeEntityBase => {
   const timestamp = new Date().toISOString();
@@ -340,6 +369,28 @@ export const createAssumption = (projectId: string): ResearchAssumption => ({
   passageIds: [],
   claimIds: [],
   status: "unassessed",
+});
+export const createGap = (projectId: string): ResearchGap => ({
+  ...base(projectId),
+  title: "",
+  missingInformation: "",
+  importance: "",
+  resolutionCriteria: "",
+  claimIds: [],
+  taskIds: [],
+  passageIds: [],
+  status: "open",
+});
+export const createDecision = (projectId: string): ResearchDecision => ({
+  ...base(projectId),
+  title: "",
+  action: "",
+  rationale: "",
+  alternatives: "",
+  claimIds: [],
+  assumptionIds: [],
+  outputIds: [],
+  status: "proposed",
 });
 export const createReviewIssue = (
   projectId: string,
@@ -657,6 +708,30 @@ export function validatePedigreeEntity(
         ...(v.methodId !== undefined ? { methodId: ident(v.methodId) } : {}),
       };
     }
+    case "gap":
+      return {
+        ...b,
+        title: text(v.title, 1000),
+        missingInformation: text(v.missingInformation),
+        importance: text(v.importance),
+        resolutionCriteria: text(v.resolutionCriteria),
+        claimIds: ids(v.claimIds),
+        taskIds: ids(v.taskIds),
+        passageIds: ids(v.passageIds),
+        status: choice(v.status, ["open", "investigating", "resolved"]),
+      };
+    case "decision":
+      return {
+        ...b,
+        title: text(v.title, 1000),
+        action: text(v.action),
+        rationale: text(v.rationale),
+        alternatives: text(v.alternatives),
+        claimIds: ids(v.claimIds),
+        assumptionIds: ids(v.assumptionIds),
+        outputIds: ids(v.outputIds),
+        status: choice(v.status, ["proposed", "made", "reconsider"]),
+      };
     case "method": {
       const methodKind = choice(v.kind, [
         "hypotheses",
@@ -804,6 +879,8 @@ export const PEDIGREE_COLLECTIONS = {
   assumption: "assumptions",
   method: "methods",
   issue: "issues",
+  gap: "gaps",
+  decision: "decisions",
 } as const;
 export function validatePedigreeState(
   input: unknown,
@@ -815,7 +892,11 @@ export function validatePedigreeState(
     PedigreeEntityKind,
     keyof PedigreeState,
   ][]) {
-    const rows = array(value[key]).map((row) =>
+    const collection =
+      value[key] === undefined && (key === "gaps" || key === "decisions")
+        ? []
+        : value[key];
+    const rows = array(collection).map((row) =>
       validatePedigreeEntity(kind, row, projectId),
     );
     if (new Set(rows.map((row) => row.id)).size !== rows.length)

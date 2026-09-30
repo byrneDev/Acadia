@@ -32,7 +32,7 @@ Get the package for your computer from [GitHub Releases](https://github.com/byrn
 | macOS, Apple Silicon | ZIP containing `Acadia.app`                | Extract the app and move it to Applications.           |
 | Windows, x64         | NSIS installer; ZIP handoff where provided | Extract the ZIP if applicable, then run the installer. |
 
-Current builds are unsigned; the macOS app is not notarized. Read the release notes before installing. Intel Mac, Linux ARM, and other Linux distributions are not release targets for 0.4.0. See [Support](SUPPORT.md) for platform and troubleshooting expectations.
+Current builds are unsigned; the macOS app is not notarized. Read the release notes before installing. Intel Mac, Linux ARM, and other Linux distributions are not release targets for 0.5.0. See [Support](SUPPORT.md) for platform and troubleshooting expectations.
 
 Start with the included [fictional library-hours investigation](docs/samples/Library-hours-sample.acadia), or create a project and enter the question you want to investigate. No API key is needed to collect, search, organize, edit, or export research.
 
@@ -42,10 +42,12 @@ Start with the included [fictional library-hours investigation](docs/samples/Lib
 
 - **Research brief:** define and revise the question, decision, scope, inclusion criteria and success criteria.
 - **Methods:** use five editable worksheets for competing hypotheses, SWOT, root causes, risk and technology readiness. Link evidence, assumptions and gap tasks; request AI review explicitly.
-- **Board:** arrange notes, questions, hypotheses, files, links, and method worksheets; draw labeled relationships; organize named areas and save useful views. **Add item** includes all five methods, with an **Open worksheet** action on their cards.
+- **Board:** use the grouped, searchable **Add item** picker to map questions, sources, reviewed evidence, findings, gaps, tasks and deliverables. Linked cards open their source reader or authoritative editor; saved edits update their previews. Place all five method worksheets, draw labeled relationships, organize named areas and save useful views.
+- **Item AI advice:** explicitly summarize a collected item or saved source version and get suggested research uses, limitations, and next steps. Edit and accept the proposal into **Reviewer Notes** to save it as linked evidence, retaining historical citations and your acceptance record. Original item notes remain intact.
 - **Sources:** read searchable PDF, Word, text, and captured web passages with page or paragraph locations, acquisition dates, and source versions. Use local English OCR for scanned PDFs and images.
 - **Evidence:** compare supporting passages, contradictions, alternative explanations, and researcher assessments without treating a drawn connection as proof.
 - **Tasks:** connect follow-up work to a question or gap, with completion criteria, status, optional dates, and resulting sources.
+- **Gaps & decisions:** record missing information, resolution criteria, related work, proposed actions, alternatives, assumptions and deliverables. Changes receive revisions; resolving a gap or making a decision remains a researcher action.
 - **Ask & analyze:** question the included collection, follow passage citations, and inspect recorded analysis runs. AI connection suggestions require acceptance.
 - **Discover:** review and approve a bounded external search plan, then decide which results enter the source library.
 
@@ -61,19 +63,29 @@ Source versions and report snapshots preserve the evidence behind older findings
 
 SQLite full-text search covers the indexed collection. A model still receives a finite selection of passages, with coverage limits recorded in the result. A verified citation establishes saved source provenance; it does not establish that a conclusion is correct. Automatic quotation detection is not exhaustive, so quoted prose still needs human review.
 
-## Desktop workspace in v0.4.0
+## Desktop workspace
 
-The current source includes an OS-aware shell with system/light/dark themes, a compact navigation sidebar, contextual source reading, and a report-focused editor. Board and report positions survive view switches. Platform menus, keyboard commands, named connection presets, and deliberate model checks reduce setup friction. See the [desktop GUI notes](docs/GUI-REFRESH.md) for behavior and validation boundaries. The v0.4.0 packages include this interface; consult the validation record for the platforms actually tested.
+The OS-aware shell introduced in v0.4 is retained in v0.5: system/light/dark themes, a compact navigation sidebar, contextual source reading, and a report-focused editor. Board and report positions survive view switches. Platform menus, keyboard commands, named connection presets, and deliberate model checks reduce setup friction. See the [desktop GUI notes](docs/GUI-REFRESH.md) for behavior and the [v0.5 validation record](docs/VALIDATION-v0.5.md) for the platforms actually tested.
 
 ## Research methods, delivery plans and data exports
 
-V0.4 adds versioned source appraisals, shared-origin review, structured findings and assumptions. Inspect the reasoning behind a conclusion and the observation that could change it. Preview an editable pedigree appendix and acknowledge analytical limitations before release. See [Research methods](docs/RESEARCH-METHODS.md).
+Versioned source appraisals, shared-origin review, structured findings and assumptions were introduced in v0.4 and remain available. Inspect the reasoning behind a conclusion and the observation that could change it. Preview an editable pedigree appendix and acknowledge analytical limitations before release. See [Research methods](docs/RESEARCH-METHODS.md).
 
 After analysis, **Plan a deliverable** turns a supported gap into a reviewable software, curriculum or other project plan. Edit work packages and export a PMIS handoff for Monday, Jira or Microsoft Planner. Use **Export data for Power BI** for linked research and delivery tables with a [data dictionary and relationship guide](docs/POWER-BI.md). Exports are local files; they do not publish data or connect to your tenant automatically.
 
-Portable projects now use **format v3** (Acadia 0.4+), retaining earlier source and report history. V1/V2 imports remain supported; new assessments start unassessed. See [v0.4 validation](docs/VALIDATION-v0.4.md) for checks and limitations.
+New in **v0.5.0**, the grouped **Add item** picker follows **Question → Sources → Reviewed Evidence → Findings → Gaps → Tasks → Deliverables**. Search for a type, create a record in its workspace, or place an existing record on the free canvas. Per-item AI advice can be edited and explicitly accepted into Reviewer Notes and Evidence. Linked cards open their authoritative editor; removing a placement keeps the research record. See [Research-to-delivery boards](docs/RESEARCH-TO-DELIVERY.md).
+
+Acadia v0.5 exports use **portable format v4**, preserving linked board records, gap/decision revisions and earlier evidence history. Import of formats v1–v3 remains supported. **V4 requires Acadia v0.5 or later**; v0.4 cannot read it. Export important investigations and keep an independent backup before upgrading. See [v0.5 validation](docs/VALIDATION-v0.5.md) for checks and limitations.
 
 ## A look inside
+
+![Grouped, searchable Add item picker for the research-to-delivery workflow](docs/screenshots/v0.5/board-items.png)
+
+_V0.5: choose a research item by purpose, create a record or link an existing one._
+
+![Research-to-delivery board connecting fictional evidence, a gap, tasks and a deliverable](docs/screenshots/v0.5/research-to-delivery.png)
+
+_V0.5: follow the chain from a question and reviewed evidence to a decision and useful work. Linked cards retain their underlying research records._
 
 ![Five research methods and a cited competing-hypotheses worksheet](docs/screenshots/v0.4/methods.png)
 
@@ -131,7 +143,7 @@ Packaging commands and release verification are in [Releasing](docs/RELEASING.md
 
 ## Quality and current boundaries
 
-Automated checks cover document extraction beyond the old page/card cutoffs, contradictory evidence, duplicate handling, source version round trips, privacy enforcement, approved search plans, citation validation, report revisions, real document exports, and separate-window release behavior. Native checks use disposable profiles. See the [0.4 validation record](docs/VALIDATION-v0.4.md) for current release checks and the mixed live-model evaluation, and [0.3 validation](docs/VALIDATION-v0.3.md) for earlier results. Consult each release for the results of its exact build.
+Automated checks cover document extraction beyond the old page/card cutoffs, contradictory evidence, duplicate handling, source version round trips, privacy enforcement, approved search plans, citation validation, report revisions, real document exports, reviewed item advice and linked board records. Native checks use disposable profiles. See the [v0.5 validation record](docs/VALIDATION-v0.5.md) for current checks and their limits. [V0.4 validation](docs/VALIDATION-v0.4.md) preserves the earlier research-methods evaluation, including rejected model responses; [v0.3 validation](docs/VALIDATION-v0.3.md) records earlier platform results. Consult each release for the results of its exact build.
 
 Printed English OCR needs review against the original. Login-dependent pages, arbitrary media codecs, very large investigations, and every possible document layout are not guaranteed. Files are bounded to 250 MB each and portable archives to approximately 1 GB. Physical touchscreens, mixed-DPI monitors, and presentation hardware need testing on your setup.
 

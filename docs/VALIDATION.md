@@ -1,5 +1,7 @@
 # Acadia 0.1.0 — validation record
 
+This is the historical 0.1.0 record. See [v0.5 validation](VALIDATION-v0.5.md) for the current release.
+
 Tested on Apple Silicon macOS on September 29, 2026.
 
 ## Passed

@@ -1,6 +1,6 @@
 # Desktop workspace refresh
 
-This interface is included in Acadia v0.4.0. Existing v0.3.0 installers do not include it. Restart the **Acadia** run configuration in WebStorm after updating the source so the Electron main process and preload load alongside the new interface. See the [v0.4 validation record](VALIDATION-v0.4.md) for current integrated checks and platform limits.
+This interface is included in Acadia v0.4.0. Existing v0.3.0 installers do not include it. Restart the **Acadia** run configuration in WebStorm after updating the source so the Electron main process and preload load alongside the new interface. The interface continues in v0.5.0; see the [v0.5 validation record](VALIDATION-v0.5.md) for current checks and platform limits.
 
 ## Workspace
 
@@ -57,6 +57,6 @@ The initial GUI checkpoint was validated on macOS arm64 on September 29, 2026. T
 
 Use `npm test`, `npm run build`, and `npm run test:e2e` to repeat the automated checks. Native tests include simulated touch, explicit cloud opt-in and discovery approval, failed extraction/migration recovery, historical citations across archive round trips, editor focus, and the audience privacy boundary. No live provider generation or billing test was repeated for this GUI update.
 
-Native Windows and Ubuntu runtime acceptance, screen-reader evaluation, physical touchscreen operation, physical dual-display use, and mixed-DPI behavior require separate validation. Automated macOS tests or simulated touch events do not establish those results. Publication and platform results are recorded separately in [GitHub Releases](https://github.com/byrneDev/Acadia/releases) and the [v0.4 validation record](VALIDATION-v0.4.md).
+Native Windows and Ubuntu runtime acceptance, screen-reader evaluation, physical touchscreen operation, physical dual-display use, and mixed-DPI behavior require separate validation. Automated macOS tests or simulated touch events do not establish those results. Publication and platform results are recorded separately in [GitHub Releases](https://github.com/byrneDev/Acadia/releases) and the [v0.5 validation record](VALIDATION-v0.5.md).
 
 See [Quick start](QUICK-START.md) for the user workflow and [release preparation](RELEASING.md) before packaging or publishing.

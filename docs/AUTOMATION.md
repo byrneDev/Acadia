@@ -6,6 +6,8 @@ The Release workflow builds and tests native packages on the same three platform
 
 Use **Run workflow** with **publish** left unchecked to build downloadable workflow artifacts without publishing. Push a `vX.Y.Z` tag matching both package files to publish after every check succeeds. A manual publish run must select that existing version tag. Published releases are not overwritten; a failed publication can be investigated before a new run.
 
+Each version has reviewed release notes in `docs/RELEASE-vX.Y.Z.md`. Publication uses the notes from the tagged source revision. Package validation checks the embedded application version and the bundled guides, samples and evaluation records before staging downloads.
+
 Action revisions are pinned to full commit hashes from official release tags. Dependabot proposes updates weekly. GitHub's generated release-note categories are configured in `release.yml`.
 
 Automated display and simulated touch checks do not establish physical monitor, touchscreen, mixed-DPI, signing, or notarization validation. See the project validation guide for those boundaries.

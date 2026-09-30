@@ -1,4 +1,4 @@
-# Acadia — quick start
+# Acadia v0.5 — quick start
 
 Acadia connects a research question to saved evidence, researcher assessments, and an editable report. The desktop interface retains the Acadia logo and lime accent while following the operating system’s appearance. The Collector is your research workspace; the Releaser develops reports and presents explicitly released revisions.
 
@@ -24,10 +24,13 @@ The board remembers its position. Releaser remembers the selected report/revisio
 - **Sources:** import PDF, DOCX, and text documents; capture a public website; search complete extracted passages. Open a source to inspect its version, acquisition date, content hash, extraction coverage, and page or paragraph locations. Highlight text inside a passage and choose **Use selection as evidence**. The original attachment opens as a viewing copy.
 - **Evidence:** record a claim, link support and contradictions, assess alternative explanations, and identify limitations. You decide whether evidence supports a claim. Verified quotations confirm their saved location, not the truth of a conclusion.
 - **Tasks:** link a follow-up to a question or evidence gap. Record a status, optional due date, completion criterion, and resulting evidence sources.
+- **Gaps & decisions:** record missing information, resolution criteria, related tasks, proposed actions, alternatives and linked deliverables. Status changes remain deliberate researcher edits.
 - **Ask & analyze:** ask the included collection a question with citations, inspect analysis history, or review proposed board connections. Accept or reject each suggestion.
 - **Discover:** prepare and review external search queries. Nothing is searched until you approve the displayed plan. Accept selected candidates into the source library; use **Add to board** when you want a visual card.
 
 Use Include, Pin, or Exclude for each source or passage. Pin relevant material that must be examined. Searches cover the indexed collection, while each model request has a finite passage/context budget disclosed in its limitations. Duplicated file content does not become independent corroboration.
+
+**Add item** groups searchable choices by the research-to-delivery workflow. Use **Create new** to open the appropriate workspace, or **Use existing** to place a saved record. Accepted Reviewer Notes and exact passages must come from existing records. Each workspace also provides **Add to board**; repeating that action focuses the existing placement. Double-click a linked card or use **Open** in its inspector to edit the record. Removing the card leaves the record saved. See the [board mapping guide](RESEARCH-TO-DELIVERY.md) for the complete set of items.
 
 ## Extraction and local OCR
 
@@ -65,12 +68,20 @@ Connect your monitor or TV through your operating system, select **Present**, th
 
 The app saves locally and waits for the Collector's final save on close. Interrupted background work is marked for explicit retry at the next launch. The first migration backs up the legacy JSON and attachment manifest before its database transaction. Original files remain separate from database records.
 
-Version 3 `.acadia` exports require Acadia 0.4 or later and include source versions, historical passages, original attachments, evidence, tasks, report revisions, analysis provenance, and versioned analytical pedigree. Version 1 and 2 archives remain importable with new assessments initially unassessed. They exclude credentials and rebuildable search indexes. Importing a project already in the library replaces that investigation after saving a recovery archive. Old card-level citations remain labeled until source originals are reprocessed; existing reports retain their legacy references.
+Acadia v0.5 writes version 4 `.acadia` archives, including linked board references, gap and decision revisions, source versions, historical passages, originals, evidence, tasks, reports and analytical pedigree. **Opening v4 requires Acadia v0.5 or later**; v0.4 cannot read it. Versions 1–3 remain importable with missing assessments initially unassessed. Archives exclude credentials and rebuildable search indexes. Importing a project already in the library replaces that investigation after saving a recovery archive. Old card-level citations remain labeled until originals are reprocessed; existing reports retain their legacy references. A missing linked record remains visibly unavailable on the board.
 
 Each attachment is limited to 250 MB and portable archives to approximately 1 GB. These are storage safety limits, not leading-text or page-count cutoffs. Recovery archives and old source versions consume disk space; keep separate backups before managing application data.
 
-## Research methods and delivery in v0.4
+## Item summaries and human review in v0.5
 
-Start in Research brief, appraise sources in their reader, then assess findings and assumptions in Evidence. **Add item** now includes all five research methods alongside Note, Question, Hypothesis and Link. Choose a method and **Add worksheet to board**, then select its card and **Open worksheet**. The same worksheets remain available in Methods. Challenge analysis is an explicit optional AI action. In Releaser, preview the analytical pedigree appendix and review limitations before release.
+For any collected card, use its sparkle button or select **AI summary & research advice** in its details. In the source reader, the same action reviews the selected saved version. Choose **Summarize & advise** to use the project's configured model. Opening the dialog alone does not call AI.
 
-After an analysis, choose Plan a deliverable for software, curriculum or another intervention. Review the resulting work packages before exporting to a PMIS. Project menu → Export data for Power BI creates linked local CSV tables and import guidance. See [Research methods](RESEARCH-METHODS.md) and [Power BI](POWER-BI.md). Portable projects exported by v0.4 require v0.4 or later.
+The saved response explains the item, possible uses in your investigation, limitations, and suggested next steps. References open the exact passages used. Long documents use a distributed passage sample with coverage shown; unreadable media or uncaptured websites require extracted text, notes, or a transcript. A linked source passage summarizes that exact historical passage. A method, finding or other analytical record is labeled as researcher work, not another independent source. Advice never changes your notes, review status, board connections, or tasks automatically. Summary history remains available after restarting and in portable project exports. Changed linked records prompt review or regeneration; excluded sources and passages remain excluded.
+
+Under **Review and accept**, edit the proposed **Reviewer Notes** and inspect their numbered source references. Confirm **I have reviewed these notes and their source references**, then choose **Accept into Reviewer Notes**. The accepted text appears in the item's Reviewer Notes field and in Evidence as a dated, linked record. Original item notes and the AI proposal are preserved. Acceptance records your interpretation with context links; it does not automatically mark the claim supported or count it as another independent source. Each saved AI summary can be accepted once, and later accepted summaries add separate entries. Accepted notes and their historical references survive restart and portable export/import. Unaccepted edits remain available while you inspect passages during the current app session.
+
+## Research methods and delivery
+
+The methods, GUI refresh, deliverable planning and data exports introduced in v0.4 remain available. Start in Research brief, appraise sources in their reader, then assess findings and assumptions in Evidence. Under **Add item → Apply methods**, choose a method and **Add worksheet to board**, then select its card and **Open worksheet**. The same worksheets remain available in Methods. Challenge analysis is an explicit optional AI action. In Releaser, preview the analytical pedigree appendix and review limitations before release.
+
+After an analysis, choose Plan a deliverable for software, curriculum or another intervention. Review the resulting work packages before exporting to a PMIS. Project menu → Export data for Power BI creates linked local CSV tables and import guidance. See [Research methods](RESEARCH-METHODS.md), [Power BI](POWER-BI.md), and [v0.5 validation](VALIDATION-v0.5.md).

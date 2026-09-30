@@ -4,10 +4,19 @@ const os = require("node:os");
 const { createHash } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 
-const version = process.env.ACADIA_RELEASE_VERSION;
+const packageInfo = JSON.parse(fs.readFileSync("package.json", "utf8"));
+const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+const version = process.env.ACADIA_RELEASE_VERSION || packageInfo.version;
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version || "")) {
-  throw new Error("ACADIA_RELEASE_VERSION must be a valid release version.");
+  throw new Error("The release version must be a valid semantic version.");
 }
+if (
+  packageInfo.version !== version ||
+  lock.version !== version ||
+  lock.packages?.[""]?.version !== version
+)
+  throw new Error("Release, package and lockfile versions must match.");
+const releaseNotes = `docs/RELEASE-v${version}.md`;
 const directory = path.resolve("release-assets");
 const names = {
   "linux-x64": [
@@ -19,10 +28,107 @@ const names = {
 };
 const manifestName = (platform) => `SHA256SUMS-${platform}.txt`;
 
+function resourceFiles() {
+  const resources = packageInfo.build?.extraResources;
+  if (!Array.isArray(resources) || !resources.length)
+    throw new Error("The release must declare its bundled guides and samples.");
+  for (const resource of resources) {
+    if (
+      !resource ||
+      typeof resource.from !== "string" ||
+      typeof resource.to !== "string" ||
+      path.isAbsolute(resource.from) ||
+      path.isAbsolute(resource.to) ||
+      /(^|[\\/])\.\.([\\/]|$)/.test(resource.from) ||
+      /(^|[\\/])\.\.([\\/]|$)/.test(resource.to) ||
+      !fs.lstatSync(resource.from).isFile()
+    )
+      throw new Error(
+        "Release extraResources must name existing explicit files within the repository.",
+      );
+  }
+  const validation = resources.find(
+    (resource) => resource.to === "VALIDATION.md",
+  );
+  const series = version.split(".").slice(0, 2).join(".");
+  if (validation?.from !== `docs/VALIDATION-v${series}.md`)
+    throw new Error(
+      "The bundled VALIDATION.md must identify this release series.",
+    );
+  return resources;
+}
+
+function metadata() {
+  resourceFiles();
+  if (
+    !fs.existsSync(releaseNotes) ||
+    !fs.lstatSync(releaseNotes).isFile() ||
+    fs.statSync(releaseNotes).size < 100 ||
+    !fs.readFileSync(releaseNotes, "utf8").includes(version)
+  )
+    throw new Error(
+      `Write reviewed release notes for this version at ${releaseNotes}.`,
+    );
+  const tag = `v${version}`;
+  const publish = process.env.REQUEST_PUBLISH === "true";
+  if (
+    (publish || process.env.GITHUB_REF_TYPE === "tag") &&
+    process.env.GITHUB_REF !== `refs/tags/${tag}`
+  )
+    throw new Error(
+      `Select or push the existing ${tag} tag. Branch dispatches only build artifacts.`,
+    );
+  if (process.env.GITHUB_OUTPUT)
+    fs.appendFileSync(
+      process.env.GITHUB_OUTPUT,
+      `version=${version}\ntag=${tag}\npublish=${publish}\nnotes=${releaseNotes}\n`,
+    );
+  console.log(
+    `Validated ${tag}, ${releaseNotes}, and its declared bundled resources.`,
+  );
+}
+
 async function digest(file) {
   const hash = createHash("sha256");
   for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
   return hash.digest("hex");
+}
+
+async function validateBundledResources(releaseDirectory, platform) {
+  const resourcesDirectory = path.join(
+    releaseDirectory,
+    {
+      "linux-x64": "linux-unpacked/resources",
+      "macos-arm64": "mac-arm64/Acadia.app/Contents/Resources",
+      "windows-x64": "win-unpacked/resources",
+    }[platform],
+  );
+  const { extractFile } = require("@electron/asar");
+  const embedded = JSON.parse(
+    extractFile(
+      path.join(resourcesDirectory, "app.asar"),
+      "package.json",
+    ).toString("utf8"),
+  );
+  if (embedded.name !== packageInfo.name || embedded.version !== version)
+    throw new Error(
+      "The packaged application's identity/version differs from the release source.",
+    );
+  const resources = resourceFiles();
+  for (const resource of resources) {
+    const bundled = path.join(resourcesDirectory, resource.to);
+    if (
+      !fs.existsSync(bundled) ||
+      !fs.lstatSync(bundled).isFile() ||
+      (await digest(bundled)) !== (await digest(resource.from))
+    )
+      throw new Error(
+        `Bundled resource is missing or differs from the release source: ${resource.to}`,
+      );
+  }
+  console.log(
+    `Verified packaged app v${version} and ${resources.length} bundled resources.`,
+  );
 }
 
 function validateLinuxPackages(releaseDirectory) {
@@ -93,6 +199,7 @@ async function stage() {
     );
   }
   const releaseDirectory = path.resolve("release", `v${version}`);
+  await validateBundledResources(releaseDirectory, platform);
   if (platform === "linux-x64") validateLinuxPackages(releaseDirectory);
   fs.mkdirSync(directory, { recursive: true });
   const lines = [];
@@ -168,9 +275,11 @@ async function verify() {
 }
 
 const command = process.argv[2];
-if (!["stage", "verify"].includes(command))
-  throw new Error("Use stage or verify.");
-(command === "stage" ? stage() : verify()).catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (!["metadata", "stage", "verify"].includes(command))
+  throw new Error("Use metadata, stage or verify.");
+Promise.resolve()
+  .then(() => ({ metadata, stage, verify })[command]())
+  .catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });

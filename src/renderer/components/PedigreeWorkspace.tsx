@@ -28,6 +28,7 @@ import {
   usePedigreeDraft,
 } from "./pedigree-ui";
 import "./PedigreeWorkspace.css";
+import { AddToBoardButton } from "./BoardMappingContext";
 
 type SharedProps = {
   project: Project;
@@ -245,7 +246,15 @@ function BriefForm({
         notice={action.notice}
         label="Save research brief"
       />
-      {saved && <RecordHistory kind="brief" id={saved.id} onError={onError} />}
+      {saved && (
+        <>
+          <AddToBoardButton
+            reference={{ kind: "brief", id: saved.id }}
+            disabled={draft.dirty || draft.saving}
+          />
+          <RecordHistory kind="brief" id={saved.id} onError={onError} />
+        </>
+      )}
     </form>
   );
 }
@@ -684,16 +693,33 @@ function FindingForm({
   );
 }
 
-export function AssumptionRegister(props: SharedProps) {
+export function AssumptionRegister(
+  props: SharedProps & {
+    requestedAssumption?: { id: string; key: number };
+    onAssumptionRequestHandled?: () => void;
+  },
+) {
   const { state, error } = usePedigree(props.project.id);
   const [editing, setEditing] = useState<Assumption>();
+  const [requestedOpen, setRequestedOpen] = useState(false);
+  useEffect(() => {
+    const request = props.requestedAssumption;
+    if (!request || !state) return;
+    const existing = latestRecords(state.assumptions).find(
+      (entry) => entry.id === request.id,
+    );
+    if (request.id !== "new" && !existing) return;
+    setEditing(existing);
+    setRequestedOpen(true);
+    props.onAssumptionRequestHandled?.();
+  }, [props.requestedAssumption?.key, props.requestedAssumption?.id, state]);
   useEffect(() => {
     if (error) props.onError(error);
   }, [error]);
   if (!state) return null;
   const assumptions = latestRecords(state.assumptions);
   return (
-    <details className="pedigree-section">
+    <details className="pedigree-section" open={requestedOpen || undefined}>
       <summary>Assumption register · {assumptions.length}</summary>
       <p>
         Make dependencies in your reasoning visible, and define how each could
@@ -714,6 +740,7 @@ export function AssumptionRegister(props: SharedProps) {
             >
               Review assumption
             </button>
+            <AddToBoardButton reference={{ kind: "assumption", id: a.id }} />
           </article>
         ))}
       </div>

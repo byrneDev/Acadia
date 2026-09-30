@@ -1,6 +1,8 @@
-# Research methods and analytical pedigree in Acadia 0.4
+# Research methods and analytical pedigree in Acadia
 
 Acadia records how an assessment was made and what could change it. It does not certify a research method or establish a finding merely because an AI generated it.
+
+The research-methods foundation arrived in v0.4. V0.5 adds item summaries reviewed and accepted into Reviewer Notes, and linked [research-to-delivery boards](RESEARCH-TO-DELIVERY.md) with revisioned gaps and decisions.
 
 ## A practical workflow
 
@@ -8,7 +10,7 @@ Acadia records how an assessment was made and what could change it. It does not 
 2. In **Sources**, open a saved version and record its evidence type, primary/secondary origin, methods, applicability, currency, limitations and possible bias. Link the passages behind the appraisal. A source update needs a new appraisal; older versions remain accessible.
 3. Confirm shared-origin relationships where several sources derive from the same study, dataset or reporting. Duplicate files, confirmed shared-origin groups and unassessed independence are distinct. Multiple articles about one experiment are not multiple independent experiments.
 4. In **Evidence**, keep supporting and conflicting passages visible. Assess the finding's reasoning, classification, assumptions, alternatives, confidence and confidence basis. Record an observation that would change the assessment. A valid citation does not mark a finding supported.
-5. From the board, choose **Add item → Research methods**, select a method, then **Add worksheet to board**. Select its card and choose **Open worksheet** to link saved evidence, findings and assumptions or create a task for a missing test. You can also start in **Methods** and use **Add to board** later. Creating a worksheet does not run AI or mark it reviewed.
+5. From the board, choose **Add item → Apply methods**, select a method, then **Add worksheet to board**. Select its card and choose **Open worksheet** to link saved evidence, findings and assumptions or create a task for a missing test. You can also start in **Methods** and use **Add to board** later. Creating a worksheet does not run AI or mark it reviewed.
 6. Draft a report. Review AI changes before applying them. Preview and edit the analytical pedigree appendix, then explicitly append it to your writing. Save a revision and review limitations before releasing it.
 
 All five worksheets can be completed manually. AI assistance requires the selected project model. **Challenge analysis** runs only when requested; it returns review proposals rather than changing research records or declaring a method reviewed.
@@ -53,6 +55,6 @@ For reporting and dashboards, use **Project menu → Export data for Power BI**.
 
 ## Storage and portability
 
-Acadia 0.4 writes portable archive format **v3**, requiring Acadia 0.4 or later. V1/V2 imports retain existing cards, assets, relationships and reports; missing appraisal/review fields stay unassessed. There is no lossy V2 export option. SQLite migration creates a consistent recovery backup before applying transactional schema changes. An interrupted job becomes visibly failed/recoverable; it does not silently become successful analysis.
+Acadia v0.5 writes portable archive format **v4**, retaining linked board references and revisioned gaps and decisions alongside analytical pedigree. **V4 requires Acadia v0.5 or later**; v0.4 cannot read it. V1–V3 imports retain existing cards, assets, relationships and reports; missing appraisal/review fields stay unassessed. There is no lossy legacy export option. SQLite migration creates a consistent recovery backup before applying transactional schema changes. An interrupted job becomes visibly failed/recoverable; it does not silently become successful analysis.
 
 Full systematic reviews, statistical dataset analysis, weighted decision optimization, collaboration and autonomous investigations remain outside this release.

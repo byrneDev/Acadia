@@ -6,6 +6,28 @@
   height: 100%;
   cursor: default;
 }
+.linked-card-info {
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 9px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.linked-card-info button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--phosphor);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.linked-record-status {
+  color: var(--phosphor);
+  font-size: 13px;
+}
 .board-context-menu,
 .board-connection-form {
   position: absolute;

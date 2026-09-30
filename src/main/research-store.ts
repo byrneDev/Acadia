@@ -4,6 +4,20 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "../shared/types";
 import { validateProject, validateCitation } from "../shared/project";
+import { reportDocument, reportToMarkdown } from "../shared/report";
+import {
+  validateBoardReference,
+  boardReferenceKey,
+  boardRecordSignature,
+  isLinkedBoardCard,
+  type BoardReference,
+} from "../shared/board";
+import {
+  validateItemInsightTarget,
+  type ItemInsight,
+  type ItemInsightReview,
+} from "../shared/item-insight";
+import { associateQuotedText } from "../shared/pedigree-analysis";
 import type {
   AnalysisRun,
   DiscoveryCandidate,
@@ -38,6 +52,8 @@ import {
   type PedigreeRevision,
   type PedigreeSnapshot,
   type PedigreeState,
+  type ResearchGap,
+  type ResearchDecision,
 } from "../shared/pedigree";
 
 const now = () => new Date().toISOString();
@@ -61,12 +77,129 @@ function cleanData<T>(value: T): T {
     ),
   ) as T;
 }
+function validatedItemReview(
+  value: unknown,
+  projectId: string,
+  sources: Map<string, SourceRecord>,
+  versions: Map<string, SourceVersion>,
+  passages: Map<string, Passage>,
+  run?: AnalysisRun,
+  snapshot = false,
+): ItemInsightReview {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid accepted reviewer notes.");
+  const raw = value as Record<string, unknown>;
+  checkId(raw.runId);
+  checkId(raw.insightId);
+  const target = validateItemInsightTarget(raw.target);
+  const acceptedAt = raw.acceptedAt;
+  if (
+    typeof acceptedAt !== "string" ||
+    !Number.isFinite(Date.parse(acceptedAt)) ||
+    typeof raw.notes !== "string" ||
+    !raw.notes.trim() ||
+    raw.notes.length > 30_000 ||
+    !Array.isArray(raw.citations) ||
+    raw.citations.length > 1000
+  )
+    throw new Error("Invalid accepted reviewer notes or date.");
+  const notes = raw.notes.trim();
+  const sourceId =
+      raw.sourceId === undefined ? undefined : String(raw.sourceId),
+    versionId = raw.versionId === undefined ? undefined : String(raw.versionId);
+  if (sourceId) checkId(sourceId);
+  if (versionId) checkId(versionId);
+  if (
+    Boolean(sourceId) !== Boolean(versionId) ||
+    (sourceId &&
+      (!sources.has(sourceId) ||
+        versions.get(versionId!)?.sourceId !== sourceId)) ||
+    (target.kind === "source" && sourceId !== target.id) ||
+    (target.versionId && versionId !== target.versionId)
+  )
+    throw new Error("Reviewed notes refer to an unavailable source version.");
+  const insight = run?.itemInsight;
+  if (
+    !snapshot &&
+    (!run ||
+      run.projectId !== projectId ||
+      run.status !== "completed" ||
+      run.kind !== "item-summary" ||
+      !insight ||
+      raw.runId !== run.id ||
+      raw.insightId !== insight.id ||
+      stableJSON(target) !== stableJSON(insight.target) ||
+      sourceId !== insight.sourceId ||
+      versionId !== insight.versionId)
+  )
+    throw new Error(
+      "Reviewed notes do not match their completed item summary.",
+    );
+  const citations = raw.citations.map((entry) => validateCitation(entry));
+  const labels = new Set(citations.map((citation) => citation.label));
+  if (
+    labels.size !== citations.length ||
+    new Set(citations.map((citation) => citation.id)).size !== citations.length
+  )
+    throw new Error("Reviewed notes contain duplicate citations.");
+  for (const citation of citations) {
+    const passage = passages.get(citation.passageId),
+      version = versions.get(citation.versionId);
+    const original = insight?.citations.find(
+      (entry) => entry.id === citation.id,
+    );
+    if (
+      !passage ||
+      !version ||
+      citation.sourceId !== sourceId ||
+      citation.versionId !== versionId ||
+      passage.sourceId !== citation.sourceId ||
+      passage.versionId !== citation.versionId ||
+      citation.locator !== passage.locator ||
+      citation.sourceTitle !== version.title ||
+      citation.acquiredAt !== version.acquiredAt ||
+      !citation.quote.trim() ||
+      !passage.text.includes(citation.quote) ||
+      !/^[1-9]\d*$/.test(citation.label) ||
+      (!snapshot &&
+        (!original || stableJSON(original) !== stableJSON(citation)))
+    )
+      throw new Error("Reviewed notes contain an invalid historical citation.");
+  }
+  const usedLabels = new Set(
+    [...notes.matchAll(/\[(?:S)?(\d+)\]/g)].map((match) => match[1]),
+  );
+  if (
+    [...usedLabels].some((label) => !labels.has(label)) ||
+    [...labels].some((label) => !usedLabels.has(label))
+  )
+    throw new Error("Reviewed notes and their cited passages do not match.");
+  if (
+    !snapshot &&
+    insight!.citations.length &&
+    !citations.length &&
+    !/insufficient evidence/i.test(notes)
+  )
+    throw new Error("Retain a verified reference in the reviewed notes.");
+  if (associateQuotedText(notes, citations).warnings.length)
+    throw new Error("Reviewed quotation attribution is ambiguous.");
+  return {
+    runId: raw.runId,
+    insightId: raw.insightId,
+    target,
+    acceptedAt,
+    notes,
+    citations,
+    sourceId,
+    versionId,
+  };
+}
 function policy(value: unknown): asserts value is Inclusion {
   if (!["include", "pin", "exclude"].includes(value as string))
     throw new Error("Invalid inclusion policy.");
 }
 export interface ResearchArchive extends ResearchState {
-  schemaVersion: 2 | 3;
+  schemaVersion: 2 | 3 | 4;
   passages: Passage[];
   pedigree?: PedigreeState;
   pedigreeRevisions?: PedigreeRevision[];
@@ -157,6 +290,16 @@ export function validatePedigreeReferences(
     rowReferences(finding);
   }
   for (const assumption of state.assumptions) rowReferences(assumption);
+  for (const gap of state.gaps ?? []) rowReferences(gap);
+  for (const decision of state.decisions ?? []) {
+    rowReferences(decision);
+    if (evidence.reportIds)
+      references(
+        decision.outputIds,
+        (id) => evidence.reportIds!.includes(id),
+        "decision report",
+      );
+  }
   for (const method of state.methods)
     for (const row of method.rows) {
       rowReferences(row);
@@ -271,6 +414,10 @@ export function validatePedigreeSnapshot(
       ...entity,
       projectId: owner,
     }));
+  // Empty new collections are a runtime default, not a historical revision.
+  for (const key of ["gaps", "decisions"] as const)
+    if (!Object.hasOwn(value.state, key))
+      delete (mappedState as Partial<PedigreeState>)[key];
   const normalized = {
     schemaVersion: 1 as const,
     id: value.id,
@@ -466,19 +613,19 @@ export class ResearchStore {
       (this.db.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
     );
-    if (version > 3) {
+    if (version > 4) {
       this.db.close();
       throw new Error(
         "This research database was created by a newer Acadia version. Open it with that version; no data was changed.",
       );
     }
     try {
-      if (existed && version < 3) {
+      if (existed && version < 4) {
         const recovery = join(storageRoot, "recovery");
         mkdirSync(recovery, { recursive: true });
         this.migrationBackupPath = join(
           recovery,
-          `schema-v${version || 2}-to-v3-${Date.now()}-${randomUUID()}.sqlite`,
+          `schema-v${version || 2}-to-v4-${Date.now()}-${randomUUID()}.sqlite`,
         );
         // VACUUM INTO takes a consistent SQLite snapshot, including committed WAL content.
         this.db.prepare("VACUUM INTO ?").run(this.migrationBackupPath);
@@ -522,10 +669,17 @@ export class ResearchStore {
       CREATE TABLE IF NOT EXISTS pedigree_revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,entity_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,UNIQUE(entity_id,revision));
       CREATE INDEX IF NOT EXISTS pedigree_revision_project ON pedigree_revisions(project_id);
       CREATE TABLE IF NOT EXISTS pedigree_snapshots(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data TEXT NOT NULL);
-      PRAGMA user_version=3;`);
+      PRAGMA user_version=4;`);
         // Seed scope only from the recorded question; never infer that the researcher reviewed it.
         for (const row of this.db.prepare("SELECT data FROM projects").all()) {
           const project = parse<Project>(row)!;
+          this.markDerivedCardSources(project);
+          if (project.schemaVersion !== 4) {
+            project.schemaVersion = 4;
+            this.db
+              .prepare("UPDATE projects SET data=? WHERE id=?")
+              .run(JSON.stringify(project), project.id);
+          }
           if (!this.listPedigree<ResearchBrief>(project.id, "brief").length)
             this.saveBrief(createBrief(project.id, project.question));
         }
@@ -599,24 +753,32 @@ export class ResearchStore {
   }
   saveProject(project: Project): void {
     const clean = validateProject(project);
-    clean.schemaVersion = 3;
+    clean.schemaVersion = 4;
     this.transaction(() => {
       this.syncCards(clean);
-      for (const card of clean.cards)
+      for (const card of clean.cards) {
+        if (card.boardReference)
+          this.resolveBoardReference(clean, card.boardReference, false);
         if (card.methodId) {
           const method = this.db
             .prepare("SELECT project_id,kind FROM pedigree_entities WHERE id=?")
             .get(card.methodId) as
             { project_id: string; kind: string } | undefined;
           if (
-            !method ||
-            method.project_id !== clean.id ||
-            method.kind !== "method"
+            method &&
+            (method.project_id !== clean.id || method.kind !== "method")
           )
             throw new Error(
               "Board method reference is outside this investigation.",
             );
         }
+      }
+      const research = this.state(clean.id);
+      validatePedigreeReferences(this.pedigreeState(clean.id), {
+        ...research,
+        passages: this.allPassages(clean.id),
+        reportIds: clean.outputs.map((output) => output.id),
+      });
       for (const output of clean.outputs)
         for (const snapshotId of [
           output.pedigreeSnapshotId,
@@ -656,7 +818,7 @@ export class ResearchStore {
         this.saveBrief(createBrief(clean.id, clean.question));
     });
     // Assign generated references back to the caller, without changing annotations.
-    project.schemaVersion = 3;
+    project.schemaVersion = 4;
     project.cards = clean.cards;
   }
   getProject(id: string): Project | undefined {
@@ -664,6 +826,270 @@ export class ResearchStore {
     return parse<Project>(
       this.db.prepare("SELECT data FROM projects WHERE id=?").get(id),
     );
+  }
+  resolveBoardReference(
+    project: Project,
+    input: BoardReference,
+    requireAvailable = true,
+  ): {
+    title: string;
+    content: string;
+    sourceId?: string;
+    versionId?: string;
+    passageId?: string;
+    methodId?: string;
+    recordSignature?: string;
+    available: boolean;
+  } {
+    const reference = validateBoardReference(input);
+    const missing = () => {
+      if (requireAvailable)
+        throw new Error(
+          "This research record is unavailable. Its board placement can be retained for context.",
+        );
+      return {
+        title: "Unavailable research record",
+        content: "",
+        available: false,
+      };
+    };
+    const owner = (projectId: string) => {
+      if (projectId !== project.id)
+        throw new Error("Board reference belongs to another investigation.");
+    };
+    if (reference.kind === "source" || reference.kind === "passage") {
+      const passage =
+        reference.kind === "passage"
+          ? parse<Passage>(
+              this.db
+                .prepare("SELECT data FROM passages WHERE id=?")
+                .get(reference.id),
+            )
+          : undefined;
+      const sourceId =
+        reference.kind === "source" ? reference.id : passage?.sourceId;
+      const source = sourceId
+        ? parse<SourceRecord>(
+            this.db
+              .prepare("SELECT data FROM sources WHERE id=?")
+              .get(sourceId),
+          )
+        : undefined;
+      const versionId = reference.versionId ?? source?.currentVersionId;
+      const version = versionId
+        ? parse<SourceVersion>(
+            this.db
+              .prepare("SELECT data FROM versions WHERE id=?")
+              .get(versionId),
+          )
+        : undefined;
+      if (source) owner(source.projectId);
+      if (version) {
+        const versionSource = parse<SourceRecord>(
+          this.db
+            .prepare("SELECT data FROM sources WHERE id=?")
+            .get(version.sourceId),
+        );
+        if (versionSource) owner(versionSource.projectId);
+        if (source && version.sourceId !== source.id)
+          throw new Error(
+            "Board reference points to a different source version.",
+          );
+      }
+      if (passage && passage.versionId !== reference.versionId)
+        throw new Error(
+          "A passage placement must retain its exact historical version.",
+        );
+      if (!source || !version || (reference.kind === "passage" && !passage))
+        return missing();
+      return {
+        title:
+          reference.kind === "passage"
+            ? `${version.title} — ${passage!.locator}`
+            : source.title,
+        content: passage?.text ?? "",
+        sourceId: source.id,
+        versionId: version.id,
+        passageId: passage?.id,
+        recordSignature: boardRecordSignature(
+          reference.kind === "passage" ? passage : source,
+        ),
+        available: true,
+      };
+    }
+    if (
+      reference.kind === "claim" ||
+      reference.kind === "review" ||
+      reference.kind === "task"
+    ) {
+      const table = reference.kind === "task" ? "tasks" : "claims";
+      const record = parse<ResearchClaim | ResearchTask>(
+        this.db
+          .prepare(`SELECT data FROM ${table} WHERE id=?`)
+          .get(reference.id),
+      );
+      if (!record) return missing();
+      owner(record.projectId);
+      if (reference.kind === "review" && !(record as ResearchClaim).itemReview)
+        throw new Error("This evidence record has no accepted reviewer notes.");
+      const claim = record as ResearchClaim;
+      return {
+        title: record.title,
+        content:
+          reference.kind === "task"
+            ? [
+                record.title,
+                record.question,
+                (record as ResearchTask).criterion,
+                `Status: ${record.status}`,
+              ].join("\n\n")
+            : [
+                record.title,
+                claim.itemReview?.notes,
+                record.question,
+                claim.alternatives,
+                claim.limitations,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+        available: true,
+        recordSignature: boardRecordSignature(record),
+      };
+    }
+    if (reference.kind === "report" || reference.kind === "delivery-plan") {
+      let output = project.outputs.find((entry) => entry.id === reference.id);
+      if (!output) {
+        for (const row of this.db
+          .prepare("SELECT data FROM projects WHERE id<>?")
+          .all(project.id)) {
+          if (
+            parse<Project>(row)?.outputs.some(
+              (entry) => entry.id === reference.id,
+            )
+          )
+            throw new Error(
+              "Board reference belongs to another investigation.",
+            );
+        }
+        return missing();
+      }
+      if (
+        reference.kind === "delivery-plan" &&
+        output.kind !== "project-plan" &&
+        !output.deliveryPlan
+      )
+        throw new Error(
+          "Choose a deliverable project plan to place on the board.",
+        );
+      return {
+        title: output.title,
+        content: [
+          reportToMarkdown(reportDocument(output)),
+          ...(reference.kind === "delivery-plan" && output.deliveryPlan
+            ? ["Saved work packages:", JSON.stringify(output.deliveryPlan)]
+            : []),
+        ].join("\n\n"),
+        available: true,
+        recordSignature: boardRecordSignature(output),
+      };
+    }
+    const row = this.db
+      .prepare("SELECT project_id,kind,data FROM pedigree_entities WHERE id=?")
+      .get(reference.id) as
+      { project_id: string; kind: string; data: string } | undefined;
+    if (!row) return missing();
+    owner(row.project_id);
+    if (row.kind !== reference.kind)
+      throw new Error(
+        "Board reference does not match the research record type.",
+      );
+    const record = JSON.parse(row.data) as Record<string, unknown>;
+    return {
+      title: String(
+        record.title ?? record.statement ?? record.question ?? reference.kind,
+      ),
+      content:
+        reference.kind === "method"
+          ? String(record.objective ?? "")
+          : Object.entries(record)
+              .filter(
+                ([key, value]) =>
+                  typeof value === "string" &&
+                  !["id", "projectId", "createdAt", "updatedAt"].includes(key),
+              )
+              .map(([key, value]) => `${key}: ${value}`)
+              .join("\n\n"),
+      methodId: reference.kind === "method" ? reference.id : undefined,
+      recordSignature: boardRecordSignature(record),
+      available: true,
+    };
+  }
+  addBoardReference(
+    project: Project,
+    input: BoardReference,
+  ): { project: Project; cardId: string } {
+    const reference = validateBoardReference(input),
+      resolved = this.resolveBoardReference(project, reference);
+    const existing = project.cards.find(
+      (card) =>
+        (card.boardReference &&
+          boardReferenceKey(card.boardReference) ===
+            boardReferenceKey(reference)) ||
+        (reference.kind === "method" && card.methodId === reference.id) ||
+        (reference.kind === "source" &&
+          !card.boardReference &&
+          !card.methodId &&
+          card.sourceId === reference.id &&
+          !reference.versionId),
+    );
+    if (existing) return { project, cardId: existing.id };
+    const timestamp = now(),
+      cardId = randomUUID();
+    const next = structuredClone(project);
+    const method =
+      reference.kind === "method"
+        ? this.pedigreeState(project.id).methods.find(
+            (entry) => entry.id === reference.id,
+          )
+        : undefined;
+    const position = project.cards.length;
+    next.schemaVersion = 4;
+    next.cards.push({
+      id: cardId,
+      kind: "note",
+      title: resolved.title.slice(0, 1000),
+      content: (method?.objective ?? resolved.content).slice(0, 6000),
+      x: 80 + (position % 4) * 300,
+      y: 80 + Math.floor(position / 4) * 240,
+      tags: method ? ["method", method.kind] : [],
+      status: "unreviewed",
+      methodId: method?.id,
+      boardReference: reference,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    next.updatedAt = timestamp;
+    this.saveProject(next);
+    return { project: next, cardId };
+  }
+  private markDerivedCardSources(project: Project): void {
+    const analytical = new Set(
+      project.cards
+        .filter(
+          (card) =>
+            isLinkedBoardCard(card) &&
+            !["source", "passage"].includes(card.boardReference?.kind ?? ""),
+        )
+        .map((card) => card.id),
+    );
+    for (const source of this.list<SourceRecord>("sources", project.id))
+      if (
+        source.cardId &&
+        analytical.has(source.cardId) &&
+        source.kind === "note" &&
+        !source.assetId
+      )
+        this.saveSource({ ...source, derived: true, inclusion: "exclude" });
   }
   listProjects(): ProjectSummary[] {
     return this.db
@@ -679,7 +1105,9 @@ export class ResearchStore {
         sourceCount: Number(
           (
             this.db
-              .prepare("SELECT count(*) AS n FROM sources WHERE project_id=?")
+              .prepare(
+                "SELECT count(*) AS n FROM sources WHERE project_id=? AND COALESCE(json_extract(data,'$.derived'),0)=0",
+              )
               .get(p.id) as { n: number }
           ).n,
         ),
@@ -728,6 +1156,8 @@ export class ResearchStore {
       assumptions: this.listPedigree(projectId, "assumption"),
       methods: this.listPedigree(projectId, "method"),
       issues: this.listPedigree(projectId, "issue"),
+      gaps: this.listPedigree(projectId, "gap"),
+      decisions: this.listPedigree(projectId, "decision"),
     };
   }
   private allPassages(projectId: string): Passage[] {
@@ -828,6 +1258,12 @@ export class ResearchStore {
   saveMethod(value: MethodWorksheet) {
     return this.savePedigree("method", value);
   }
+  saveGap(value: ResearchGap) {
+    return this.savePedigree("gap", value);
+  }
+  saveDecision(value: ResearchDecision) {
+    return this.savePedigree("decision", value);
+  }
   saveReviewIssue(value: ReviewIssue) {
     return this.savePedigree("issue", value);
   }
@@ -917,6 +1353,11 @@ export class ResearchStore {
     );
     if (old && old.projectId !== source.projectId)
       throw new Error("Source belongs to another project.");
+    if (old?.derived && (!source.derived || source.inclusion !== "exclude"))
+      throw new Error(
+        "Analytical board text is retained for history and cannot become an independent source.",
+      );
+    if (source.derived) source = { ...source, inclusion: "exclude" };
     this.db
       .prepare(
         "INSERT INTO sources VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,card_id=excluded.card_id,data=excluded.data",
@@ -1085,7 +1526,9 @@ export class ResearchStore {
       const source = this.getSource(passage.sourceId).source;
       // A policy change changes the usable evidence base even when document bytes
       // stay unchanged. Keep the report's frozen source timestamp for comparison.
-      const updatedAt = new Date(Math.max(Date.now(), Date.parse(source.updatedAt) + 1)).toISOString();
+      const updatedAt = new Date(
+        Math.max(Date.now(), Date.parse(source.updatedAt) + 1),
+      ).toISOString();
       this.saveSource({ ...source, updatedAt });
     });
   }
@@ -1095,6 +1538,7 @@ export class ResearchStore {
   ): Passage[] {
     const filters = [
       "s.project_id=?",
+      "COALESCE(json_extract(s.data,'$.derived'),0)=0",
       options.versionId
         ? "p.version_id=?"
         : "p.version_id=json_extract(s.data,'$.currentVersionId')",
@@ -1130,7 +1574,7 @@ export class ResearchStore {
       .join(" OR ");
     const rows = this.db
       .prepare(
-        `SELECT p.data,s.data AS source,bm25(passage_fts) AS score FROM passage_fts JOIN passages p ON p.id=passage_fts.id JOIN sources s ON s.id=p.source_id WHERE passage_fts MATCH ? AND s.project_id=? AND json_extract(s.data,'$.inclusion')<>'exclude' AND json_extract(p.data,'$.inclusion')<>'exclude' AND p.version_id=json_extract(s.data,'$.currentVersionId') ORDER BY CASE WHEN json_extract(s.data,'$.inclusion')='pin' OR json_extract(p.data,'$.inclusion')='pin' THEN 0 ELSE 1 END,score LIMIT ?`,
+        `SELECT p.data,s.data AS source,bm25(passage_fts) AS score FROM passage_fts JOIN passages p ON p.id=passage_fts.id JOIN sources s ON s.id=p.source_id WHERE passage_fts MATCH ? AND s.project_id=? AND COALESCE(json_extract(s.data,'$.derived'),0)=0 AND json_extract(s.data,'$.inclusion')<>'exclude' AND json_extract(p.data,'$.inclusion')<>'exclude' AND p.version_id=json_extract(s.data,'$.currentVersionId') ORDER BY CASE WHEN json_extract(s.data,'$.inclusion')='pin' OR json_extract(p.data,'$.inclusion')='pin' THEN 0 ELSE 1 END,score LIMIT ?`,
       )
       .all(expression, projectId, Math.max(1, Math.min(500, limit))) as {
       data: string;
@@ -1144,7 +1588,9 @@ export class ResearchStore {
     }));
   }
   syncCards(project: Project) {
+    this.markDerivedCardSources(project);
     for (const card of project.cards) {
+      if (isLinkedBoardCard(card)) continue;
       let source = card.sourceId
         ? parse<SourceRecord>(
             this.db
@@ -1290,6 +1736,37 @@ export class ResearchStore {
     }
   }
   saveClaim(value: ResearchClaim) {
+    const existing = parse<ResearchClaim>(
+      this.db.prepare("SELECT data FROM claims WHERE id=?").get(value.id),
+    );
+    if (value.itemReview || existing?.itemReview) {
+      if (
+        !existing?.itemReview ||
+        !value.itemReview ||
+        stableJSON(value.itemReview) !== stableJSON(existing.itemReview)
+      )
+        throw new Error(
+          "Accepted reviewer notes are immutable. Use the explicit review and acceptance action for a new summary.",
+        );
+      if (value.cardId !== existing.cardId)
+        throw new Error(
+          "Accepted reviewer notes retain their original item association.",
+        );
+    }
+    this.writeClaim(value);
+  }
+  private writeClaim(value: ResearchClaim) {
+    if (
+      value.itemReview &&
+      this.db
+        .prepare(
+          "SELECT id FROM claims WHERE project_id=? AND id<>? AND json_extract(data,'$.itemReview.runId')=?",
+        )
+        .get(value.projectId, value.id, value.itemReview.runId)
+    )
+      throw new Error(
+        "This item summary already has an accepted reviewer-note record.",
+      );
     if (
       !["unreviewed", "provisional", "supported", "disputed"].includes(
         value.status,
@@ -1317,15 +1794,63 @@ export class ResearchStore {
     }
     this.write("claims", value);
   }
+  saveItemReviewClaim(value: ResearchClaim): ResearchClaim {
+    return this.transaction(() => {
+      if (!value.itemReview)
+        throw new Error("No reviewed item summary was supplied.");
+      const research = this.exportResearch(value.projectId);
+      const review = validatedItemReview(
+        value.itemReview,
+        value.projectId,
+        new Map(research.sources.map((entry) => [entry.id, entry])),
+        new Map(research.versions.map((entry) => [entry.id, entry])),
+        new Map(research.passages.map((entry) => [entry.id, entry])),
+        research.runs.find((entry) => entry.id === value.itemReview!.runId),
+      );
+      const existing = research.claims.find(
+        (claim) => claim.itemReview?.runId === review.runId,
+      );
+      if (existing) {
+        if (existing.itemReview!.notes !== review.notes)
+          throw new Error("This summary already has accepted reviewer notes.");
+        return existing;
+      }
+      if (
+        value.status !== "provisional" ||
+        value.links.length !== review.citations.length ||
+        value.links.some(
+          (link) =>
+            link.relation !== "context" ||
+            !review.citations.some(
+              (citation) =>
+                citation.passageId === link.passageId &&
+                citation.quote === link.quote,
+            ),
+        )
+      )
+        throw new Error(
+          "Acceptance records interpretation as provisional context, not verified support.",
+        );
+      const saved = { ...value, itemReview: review };
+      this.writeClaim(saved);
+      return saved;
+    });
+  }
   deleteClaim(id: string) {
     checkId(id);
     const claim = parse<ResearchClaim>(
       this.db.prepare("SELECT data FROM claims WHERE id=?").get(id),
     );
     if (!claim) return;
+    if (claim.itemReview)
+      throw new Error(
+        "Accepted reviewer notes preserve the review history. Update the evidence assessment or record a new review instead of deleting this record.",
+      );
     const state = this.pedigreeState(claim.projectId);
     if (
       state.findings.some((finding) => finding.claimId === id) ||
+      state.gaps.some((gap) => gap.claimIds.includes(id)) ||
+      state.decisions.some((decision) => decision.claimIds.includes(id)) ||
       state.assumptions.some((assumption) =>
         assumption.claimIds.includes(id),
       ) ||
@@ -1388,6 +1913,7 @@ export class ResearchStore {
       state.methods.some((method) =>
         method.rows.some((row) => row.taskIds.includes(id)),
       ) ||
+      state.gaps.some((gap) => gap.taskIds.includes(id)) ||
       state.issues.some((issue) => issue.taskIds.includes(id))
     )
       throw new Error(
@@ -1447,7 +1973,7 @@ export class ResearchStore {
       .map((row) => parse<Passage>(row)!);
     return cleanData({
       ...state,
-      schemaVersion: 3,
+      schemaVersion: 4,
       pedigree: this.pedigreeState(projectId),
       pedigreeRevisions: this.db
         .prepare(
@@ -1484,10 +2010,16 @@ export class ResearchStore {
   importResearch(
     projectId: string,
     value: unknown,
-    options: { replace?: boolean } = {},
+    options: { replace?: boolean; projectCards?: Project["cards"] } = {},
   ) {
     checkId(projectId);
-    const data = validateResearchArchive(value, projectId);
+    const data = validateResearchArchive(
+      value,
+      projectId,
+      undefined,
+      options.projectCards ??
+        (options.replace ? undefined : this.getProject(projectId)?.cards),
+    );
     this.transaction(() => {
       if (options.replace) {
         this.db
@@ -1538,8 +2070,9 @@ export class ResearchStore {
       }
       // Restore exported current pointers (historical versions are not necessarily ordered).
       for (const source of data.sources) this.saveSource(source);
-      for (const claim of data.claims) this.saveClaim(claim);
       for (const run of data.runs) this.saveRun(run);
+      // The archive validator has checked accepted-note provenance and uniqueness.
+      for (const claim of data.claims) this.writeClaim(claim);
       for (const item of data.discoveries) this.saveDiscovery(item);
       if (data.pedigree) {
         for (const [kind, key] of Object.entries(PEDIGREE_COLLECTIONS) as [
@@ -1623,11 +2156,16 @@ export function validateResearchArchive(
   value: unknown,
   projectId: string,
   snapshotState?: PedigreeState,
+  projectCards?: Project["cards"],
 ): ResearchArchive {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid research archive.");
   const raw = value as Record<string, unknown>;
-  if (raw.schemaVersion !== 2 && raw.schemaVersion !== 3)
+  if (
+    raw.schemaVersion !== 2 &&
+    raw.schemaVersion !== 3 &&
+    raw.schemaVersion !== 4
+  )
     throw new Error("Unsupported research archive version.");
   const arr = (key: string, max = 100_000): Record<string, unknown>[] => {
     const v = raw[key];
@@ -1684,6 +2222,14 @@ export function validateResearchArchive(
     currentVersionId: ident(s.currentVersionId),
     inclusion: choice(s.inclusion, ["include", "pin", "exclude"]),
     duplicateOf: s.duplicateOf === undefined ? undefined : ident(s.duplicateOf),
+    derived:
+      s.derived === undefined
+        ? undefined
+        : (() => {
+            if (typeof s.derived !== "boolean")
+              throw new Error("Invalid derived source marker.");
+            return s.derived;
+          })(),
     createdAt: timestamp(s.createdAt),
     updatedAt: timestamp(s.updatedAt),
   }));
@@ -1738,7 +2284,8 @@ export function validateResearchArchive(
   for (const s of sources)
     if (
       versionMap.get(s.currentVersionId)?.sourceId !== s.id ||
-      (s.duplicateOf && !sourceMap.has(s.duplicateOf))
+      (s.duplicateOf && !sourceMap.has(s.duplicateOf)) ||
+      (s.derived && s.inclusion !== "exclude")
     )
       throw new Error("Broken source version reference.");
   for (const v of versions) {
@@ -1750,7 +2297,8 @@ export function validateResearchArchive(
   for (const p of passages)
     if (versionMap.get(p.versionId)?.sourceId !== p.sourceId)
       throw new Error("Broken passage reference.");
-  const claims: ResearchClaim[] = arr("claims").map((c) => ({
+  const claimRecords = arr("claims");
+  const claims: ResearchClaim[] = claimRecords.map((c) => ({
     id: ident(c.id),
     projectId,
     title: text(c.title),
@@ -1825,6 +2373,163 @@ export function validateResearchArchive(
         )
           throw new Error("Invalid archived citation anchor.");
       }
+    let itemInsight: ItemInsight | undefined;
+    if (r.itemInsight !== undefined) {
+      if (
+        !r.itemInsight ||
+        typeof r.itemInsight !== "object" ||
+        Array.isArray(r.itemInsight)
+      )
+        throw new Error("Invalid archived item summary.");
+      const value = r.itemInsight as Record<string, unknown>,
+        target = validateItemInsightTarget(value.target);
+      const card =
+        target.kind === "card"
+          ? projectCards?.find((entry) => entry.id === target.id)
+          : undefined;
+      const sourceId =
+        value.sourceId === undefined ? undefined : ident(value.sourceId);
+      const versionId =
+        value.versionId === undefined ? undefined : ident(value.versionId);
+      if (
+        r.kind !== "item-summary" ||
+        r.status !== "completed" ||
+        value.runId !== r.id ||
+        value.provider !== r.provider ||
+        value.model !== r.model ||
+        value.question !== r.question ||
+        (target.kind === "source" && sourceId !== target.id) ||
+        (sourceId && !sourceMap.has(sourceId)) ||
+        (versionId && versionMap.get(versionId)?.sourceId !== sourceId) ||
+        (sourceId && !versionId) ||
+        (versionId && !sourceId) ||
+        (target.versionId !== undefined && target.versionId !== versionId) ||
+        (card &&
+          sourceId &&
+          sourceId !== card.sourceId &&
+          sourceMap.get(sourceId)?.cardId !== card.id &&
+          !(
+            card.boardReference?.kind === "source" &&
+            card.boardReference.id === sourceId &&
+            (!card.boardReference.versionId ||
+              card.boardReference.versionId === versionId)
+          ) &&
+          !(
+            card.boardReference?.kind === "passage" &&
+            passageMap.get(card.boardReference.id)?.sourceId === sourceId &&
+            card.boardReference.versionId === versionId
+          ))
+      )
+        throw new Error(
+          "Archived item summary has an invalid target or source version.",
+        );
+      if (!Array.isArray(value.citations) || value.citations.length > 1000)
+        throw new Error("Invalid archived item summary citations.");
+      const insightCitations = value.citations.map((entry) =>
+        validateCitation(entry),
+      );
+      if (
+        new Set(insightCitations.map((entry) => entry.id)).size !==
+          insightCitations.length ||
+        new Set(insightCitations.map((entry) => entry.label)).size !==
+          insightCitations.length ||
+        insightCitations.some(
+          (entry) => !/^[1-9]\d*$/.test(entry.label) || !entry.quote.trim(),
+        )
+      )
+        throw new Error("Invalid archived item summary citation labels.");
+      for (const citation of insightCitations) {
+        const original = citations.find((entry) => entry.id === citation.id);
+        const passage = passageMap.get(citation.passageId),
+          version = versionMap.get(citation.versionId);
+        if (
+          !original ||
+          stableJSON(citation) !== stableJSON(original) ||
+          !passage ||
+          !version ||
+          citation.sourceId !== sourceId ||
+          citation.versionId !== versionId ||
+          citation.locator !== passage.locator ||
+          citation.sourceTitle !== version.title ||
+          citation.acquiredAt !== version.acquiredAt ||
+          !passage.text.includes(citation.quote)
+        )
+          throw new Error("Invalid archived item summary citation anchor.");
+      }
+      const markdown = text(value.markdown, 200_000);
+      if (!markdown.trim()) throw new Error("Archived item summary is empty.");
+      const labels = new Set(insightCitations.map((entry) => entry.label));
+      if (
+        [...markdown.matchAll(/\[(?:S)?(\d+)\]/g)].some(
+          (match) => !labels.has(match[1]),
+        )
+      )
+        throw new Error(
+          "Archived item summary refers to unavailable citations.",
+        );
+      associateQuotedText(markdown, insightCitations);
+      if (
+        !value.coverage ||
+        typeof value.coverage !== "object" ||
+        Array.isArray(value.coverage)
+      )
+        throw new Error("Invalid archived item summary coverage.");
+      const coverage = value.coverage as Record<string, unknown>;
+      if (!Array.isArray(coverage.warnings) || coverage.warnings.length > 1000)
+        throw new Error("Invalid archived item summary warnings.");
+      const counts = {
+        availablePassages: n(coverage.availablePassages),
+        selectedPassages: n(coverage.selectedPassages),
+        processedUnits: n(coverage.processedUnits),
+        totalUnits: n(coverage.totalUnits),
+      };
+      if (
+        counts.selectedPassages > counts.availablePassages ||
+        counts.processedUnits > counts.totalUnits ||
+        insightCitations.length > counts.selectedPassages
+      )
+        throw new Error("Invalid archived item summary coverage counts.");
+      itemInsight = {
+        id: ident(value.id),
+        runId: ident(value.runId),
+        target,
+        itemTitle: text(value.itemTitle),
+        question: text(value.question),
+        markdown,
+        citations: insightCitations,
+        createdAt: timestamp(value.createdAt),
+        provider: text(value.provider),
+        model: text(value.model),
+        cardUpdatedAt:
+          value.cardUpdatedAt === undefined
+            ? undefined
+            : timestamp(value.cardUpdatedAt),
+        sourceId,
+        versionId,
+        methodRevision:
+          value.methodRevision === undefined
+            ? undefined
+            : n(value.methodRevision),
+        briefRevision:
+          value.briefRevision === undefined
+            ? undefined
+            : n(value.briefRevision),
+        boardRecordSignature:
+          value.boardRecordSignature === undefined
+            ? undefined
+            : (() => {
+                const signature = text(value.boardRecordSignature, 64);
+                if (!/^board-v1-[a-f0-9]{16}$/.test(signature))
+                  throw new Error("Invalid linked-record change signature.");
+                return signature;
+              })(),
+        coverage: {
+          ...counts,
+          status: text(coverage.status, 100),
+          warnings: coverage.warnings.map((entry) => text(entry, 10000)),
+        },
+      };
+    }
     return {
       id: ident(r.id),
       projectId,
@@ -1893,6 +2598,7 @@ export function validateResearchArchive(
         ? { pedigreeSnapshotId: ident(r.pedigreeSnapshotId) }
         : {}),
       ...validatedRunAudit(r, passageMap, sourceMap),
+      ...(itemInsight ? { itemInsight } : {}),
     };
   });
   const discoveries: DiscoveryCandidate[] = arr("discoveries").map((d) => ({
@@ -1906,6 +2612,28 @@ export function validateResearchArchive(
     capturedAt: optional(d.capturedAt),
     error: optional(d.error),
   }));
+  const acceptedRuns = new Set<string>();
+  for (const [index, claim] of claims.entries()) {
+    const value = claimRecords[index].itemReview;
+    if (value === undefined) continue;
+    if (raw.schemaVersion === 2 && !snapshotState)
+      throw new Error("Accepted reviewer notes require a version 3 archive.");
+    const reviewRunId = (value as Record<string, unknown>)?.runId;
+    claim.itemReview = validatedItemReview(
+      value,
+      projectId,
+      sourceMap,
+      versionMap,
+      passageMap,
+      runs.find((run) => run.id === reviewRunId),
+      Boolean(snapshotState),
+    );
+    if (acceptedRuns.has(claim.itemReview.runId))
+      throw new Error(
+        "An item summary can have only one accepted reviewer-note record.",
+      );
+    acceptedRuns.add(claim.itemReview.runId);
+  }
   for (const collection of [claims, tasks, runs, discoveries])
     if (new Set(collection.map((x) => x.id)).size !== collection.length)
       throw new Error("Duplicate research identifiers.");
@@ -1915,13 +2643,25 @@ export function validateResearchArchive(
   let pedigree = emptyPedigreeState();
   let pedigreeRevisions: PedigreeRevision[] = [];
   let pedigreeSnapshots: PedigreeSnapshot[] = [];
-  if (raw.schemaVersion === 3) {
+  if (raw.schemaVersion === 3 || raw.schemaVersion === 4) {
     const state = raw.pedigree as Record<string, unknown> | undefined;
     if (!state || typeof state !== "object")
       throw new Error("Version 3 archive is missing pedigree records.");
+    if (
+      raw.schemaVersion === 3 &&
+      [state.gaps, state.decisions].some(
+        (rows) => Array.isArray(rows) && rows.length,
+      )
+    )
+      throw new Error("Gap and decision records require archive version 4.");
     const rebased: Record<string, unknown> = {};
     for (const key of Object.values(PEDIGREE_COLLECTIONS)) {
-      const rows = state[key];
+      const rows =
+        state[key] === undefined &&
+        raw.schemaVersion === 3 &&
+        ["gaps", "decisions"].includes(key)
+          ? []
+          : state[key];
       if (!Array.isArray(rows))
         throw new Error("Invalid pedigree archive collection.");
       rebased[key] = rows.map((entity) => ({ ...entity, projectId }));
@@ -1993,6 +2733,19 @@ export function validateResearchArchive(
     pedigreeSnapshots = arr("pedigreeSnapshots", 10_000).map((snapshot) =>
       validatePedigreeSnapshot(snapshot, projectId),
     );
+    for (const snapshot of pedigreeSnapshots)
+      for (const claim of snapshot.claims)
+        if (claim.itemReview)
+          validatedItemReview(
+            claim.itemReview,
+            projectId,
+            new Map(snapshot.sources.map((source) => [source.id, source])),
+            new Map(
+              snapshot.sourceVersions.map((version) => [version.id, version]),
+            ),
+            new Map(snapshot.passages.map((passage) => [passage.id, passage])),
+            runs.find((run) => run.id === claim.itemReview!.runId),
+          );
     if (
       new Set(pedigreeSnapshots.map((snapshot) => snapshot.id)).size !==
       pedigreeSnapshots.length
@@ -2022,6 +2775,44 @@ export function validateResearchArchive(
       claims,
       tasks,
     });
+  }
+  for (const card of projectCards ?? []) {
+    if (!card.boardReference) continue;
+    if (raw.schemaVersion !== 4)
+      throw new Error("Linked research board items require archive version 4.");
+    const ref = validateBoardReference(card.boardReference);
+    if (
+      ref.kind === "source" &&
+      ref.versionId &&
+      versionMap.has(ref.versionId) &&
+      versionMap.get(ref.versionId)!.sourceId !== ref.id
+    )
+      throw new Error(
+        "Board source reference points to a different historical version.",
+      );
+    if (
+      ref.kind === "passage" &&
+      passageMap.has(ref.id) &&
+      passageMap.get(ref.id)!.versionId !== ref.versionId
+    )
+      throw new Error(
+        "Board passage reference has an invalid historical version.",
+      );
+    if (
+      ref.kind === "review" &&
+      claims.some((claim) => claim.id === ref.id && !claim.itemReview)
+    )
+      throw new Error("Board review reference has no accepted reviewer notes.");
+    const kinds = new Map<string, string>();
+    for (const [kind, key] of Object.entries(PEDIGREE_COLLECTIONS) as [
+      PedigreeEntityKind,
+      keyof PedigreeState,
+    ][])
+      for (const entity of pedigree[key] ?? []) kinds.set(entity.id, kind);
+    if (kinds.has(ref.id) && kinds.get(ref.id) !== ref.kind)
+      throw new Error(
+        "Board reference does not match its saved research record type.",
+      );
   }
   return {
     schemaVersion: raw.schemaVersion,

@@ -376,6 +376,10 @@ export class Ingestion {
   }
   startFile(projectId: string, sourceId: string, ocr = false): ResearchJob {
     const source = this.store.getSource(sourceId).source;
+    if (source.derived)
+      throw new Error(
+        "Analytical board references are not importable source documents.",
+      );
     if (source.projectId !== projectId)
       throw new Error("Source belongs to another project.");
     if (!source.assetId) {
@@ -667,6 +671,10 @@ export class Ingestion {
           createdAt: date(),
           updatedAt: date(),
         };
+    if (source.derived)
+      throw new Error(
+        "Analytical board references cannot be captured as independent evidence.",
+      );
     if (source.projectId !== projectId)
       throw new Error("Source belongs to another project.");
     if (

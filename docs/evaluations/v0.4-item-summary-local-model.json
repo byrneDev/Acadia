@@ -1,0 +1,129 @@
+{
+  "evaluationVersion": 1,
+  "application": "Acadia v0.4.0 per-item summary source follow-up",
+  "scope": "Two explicitly requested local-model examples on one identical fictional note. One initial rejected attempt and one accepted attempt after a targeted prompt refinement; not a success-rate estimate or general accuracy claim.",
+  "provider": "ollama",
+  "model": "qwen3.5:9b",
+  "modelDigest": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+  "privacy": "An isolated temporary SQLite store was used for each attempt. Network access was restricted to one loopback Ollama chat request per attempt. No real investigation, user profile, credentials, web search or cloud service was used. No model installation or server configuration was changed. Disposable tests and stores were removed.",
+  "ceilingMs": 120000,
+  "fixture": {
+    "title": "Fictional uncontrolled Cedar pilot",
+    "question": "Is the fictional Cedar filter ready for a factory rollout, or what evidence should we collect next?",
+    "note": "FICTIONAL RESEARCH NOTE: Cedar filters were fitted to six convenience-selected machines for four days. Downtime declined from ten to four stops per shift. There was no comparison group. Production load and staffing changed during the same week. These observations do not establish that Cedar caused the decrease. No long-term reliability or safety outcomes have been collected. A matched-load comparison with stable staffing is the decisive missing test.",
+    "expectedAssessment": "Retain the observed before/after measurements; do not infer causation or rollout readiness. Recognize missing comparison, concurrent load/staffing changes and missing long-term outcomes. Propose the matched-load comparison."
+  },
+  "attempts": [
+    {
+      "promptRevision": "Initial single-item instructions",
+      "promptChange": "Requested summary, research use, limitations and next steps with source citations and exact quotations when used.",
+      "startedAt": "2026-09-30T00:00:14.167Z",
+      "elapsedMs": 55774,
+      "requestCount": 1,
+      "status": "failed",
+      "accepted": false,
+      "message": "Grounding check failed: quoted text is absent from the cited source passages. No draft was applied.",
+      "generationSettings": {
+        "stream": false,
+        "format": {
+          "type": "object",
+          "properties": {
+            "markdown": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "markdown"
+          ],
+          "additionalProperties": false
+        },
+        "think": false,
+        "options": {
+          "num_predict": 2400,
+          "num_ctx": 8192,
+          "temperature": 0.2
+        },
+        "timeoutMs": 360000
+      },
+      "returnedMarkdown": "# Summary\nThe provided note describes a pilot study where fictional \"Cedar filters\" were installed on six convenience-selected machines for four days [1]. During this period, downtime declined from ten to four stops per shift. However, the text explicitly states that there was no comparison group and production load/staffing changed concurrently [1], meaning these observations do not establish causation between the filter installation and reduced downtime.\n\n# Use in this investigation\nThis item serves as a preliminary observation of potential efficacy but lacks evidential weight for decision-making regarding factory rollout. It highlights an initial positive signal (reduced stops) that requires rigorous validation before being treated as proof of readiness [1]. The note functions to identify the specific methodological gaps—specifically the lack of control groups and stable operational conditions—that must be addressed in future testing.\n\n# Limits / cannot conclude\nThe current evidence is insufficient to support a conclusion on factory rollout readiness. Key limitations include:\n*   **No Control Group:** There was no baseline or comparison group against which to measure improvement [1].\n*   **Confounding Variables:** Production load and staffing changed during the test week, introducing confounders that could explain the downtime reduction rather than the filters themselves [1].\n*   **Short Duration:** The pilot lasted only four days, precluding assessment of long-term reliability or safety outcomes [1].\n*   **Selection Bias:** Machines were \"convenience-selected,\" which may not represent the broader factory population.\n\n# Suggested next steps\nTo determine if Cedar filters are ready for rollout, the following actions should be prioritized:\n*   Conduct a matched-load comparison study with stable staffing levels to isolate the effect of the filter [1].\n*   Implement a control group (machines without new filters) running under identical conditions.\n*   Extend the pilot duration beyond four days to collect data on long-term reliability and safety outcomes.\n*   Ensure consistent production loads during testing to eliminate confounding variables.",
+      "acceptedCitations": [],
+      "groundingWarnings": [
+        "AI suggestions require researcher review. Citation validity does not establish evidential support.",
+        "The saved text consists of researcher notes or manual excerpts. The original website, document, image, audio, or video was not accessed by this summary.",
+        "Grounding check failed: quoted text is absent from the cited source passages. No draft was applied."
+      ],
+      "manualReview": {
+        "parser": "Valid structured JSON with all requested headings.",
+        "grounding": "Rejected by exact quotation validation; convenience-selected was quoted with a comma absent from the saved source substring.",
+        "reasoning": "Recognized concurrent load and staffing changes, short duration, selection limitations and missing comparative evidence; did not recommend rollout as established.",
+        "limitation": "The response incorrectly said no baseline or comparison group; the fictional note contains before/after stop counts, so only the comparison-group omission is supported. This shows why advice still needs researcher review.",
+        "effect": "No summary was accepted or applied; original research remained unchanged. No retry or fallback was attempted."
+      },
+      "researchUnchanged": true
+    },
+    {
+      "promptRevision": "Cited paraphrases with explicit baseline/control-group distinction",
+      "promptChange": "Requested cited paraphrases without quotation marks or block quotes, preservation of measurements, and an explicit distinction between no control group and absent baseline observations. The quotation validator was not weakened.",
+      "startedAt": "2026-09-30T00:02:26.506Z",
+      "elapsedMs": 47653,
+      "requestCount": 1,
+      "status": "completed",
+      "accepted": true,
+      "message": "Completed",
+      "generationSettings": {
+        "stream": false,
+        "format": {
+          "type": "object",
+          "properties": {
+            "markdown": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "markdown"
+          ],
+          "additionalProperties": false
+        },
+        "think": false,
+        "options": {
+          "num_predict": 2400,
+          "num_ctx": 12288,
+          "temperature": 0.2
+        },
+        "timeoutMs": 360000
+      },
+      "returnedMarkdown": "# Summary\nThe fictional uncontrolled Cedar pilot involved fitting filters to six convenience-selected machines over a four-day period, resulting in observed downtime declining from ten to four stops per shift [1].\n\n# Use in this investigation\nThis item provides preliminary observational data suggesting an association between the installation of Cedar filters and reduced machine downtime. However, because there was no comparison group and production conditions such as load and staffing changed during the trial week, these observations cannot establish that the filter caused the decrease [1]. The note explicitly states that a matched-load comparison with stable staffing is required to determine causal efficacy.\n\n# Limits / cannot conclude\nThe study lacks a control group for direct comparison. Confounding variables including fluctuating production load and changing staffing levels were not controlled, making it impossible to isolate the effect of the filter [1]. Long-term reliability or safety outcomes have not been collected yet [1]. The absence of these elements means current evidence is insufficient to support factory rollout decisions.\n\n# Suggested next steps\nConduct a matched-load comparison trial with stable staffing conditions to verify whether downtime reduction persists when confounding variables are controlled. Collect long-term data on reliability and safety outcomes before considering broader deployment.",
+      "acceptedCitations": [
+        {
+          "label": "1",
+          "locator": "Note, paragraph 1",
+          "quote": "FICTIONAL RESEARCH NOTE: Cedar filters were fitted to six convenience-selected machines for four days. Downtime declined from ten to four stops per shift. There was no comparison group. Production load and staffing changed during the same week. These observations do not establish that Cedar caused the decrease. No long-term reliability or safety outcomes have been collected. A matched-load comparison with stable staffing is the decisive missing test.",
+          "verified": true
+        }
+      ],
+      "groundingWarnings": [
+        "AI suggestions require researcher review. Citation validity does not establish evidential support.",
+        "The saved text consists of researcher notes or manual excerpts. The original website, document, image, audio, or video was not accessed by this summary."
+      ],
+      "manualReview": {
+        "parserAndCitations": "Accepted structured JSON and one exact saved passage citation; no direct quotation mismatch.",
+        "measurementFidelity": "Preserved six machines, four days, and downtime falling from ten to four stops per shift. Did not repeat the earlier false claim that baseline observations were absent.",
+        "reasoning": "Distinguished observed association from causality, retained workload and staffing confounders, withheld rollout support and proposed the missing matched-load comparison plus reliability/safety follow-up.",
+        "limitations": "Single short fictional note. This does not establish accuracy for long documents, incomplete extraction, media, or other investigations; wording and recommendations still need researcher review.",
+        "effect": "Saved the advice and historical citation only. Research cards, review status, evidence and tasks remained unchanged."
+      },
+      "researchUnchanged": true
+    }
+  ],
+  "interpretation": "The first response was correctly rejected for a non-exact quotation and also misstated the availability of baseline observations. The revised attempt preserved measurements, separated association from causation and retained the missing comparative evidence. Acceptance confirms response/citation checks for this example, not evidence quality or general model reliability.",
+  "reviewer": "Codex inspection of the synthetic note, actual returned text and validation results; not independent expert review.",
+  "limitations": [
+    "One short paragraph explicitly states the design flaws and missing test; this is easier than many research sources.",
+    "No long-document, incomplete-extraction, image, audio, video or other-provider model-quality claim follows from this example.",
+    "The effective Ollama context budget increased from 8192 to 12288 tokens with the longer prompt; temperature and response limit were unchanged.",
+    "Each request had a two-minute cancellation ceiling. Neither reached it. No automatic retry or fallback occurred.",
+    "Saved advice did not create evidence, change review status, add tasks or modify collected items."
+  ]
+}

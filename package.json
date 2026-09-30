@@ -1,6 +1,6 @@
 {
   "name": "acadia",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Collect evidence. Connect ideas. Release understanding.",
   "author": {
     "name": "byrneDev",
@@ -161,7 +161,7 @@
         "to": "Library-hours-sample.acadia"
       },
       {
-        "from": "docs/VALIDATION-v0.4.md",
+        "from": "docs/VALIDATION-v0.5.md",
         "to": "VALIDATION.md"
       },
       {
@@ -177,8 +177,24 @@
         "to": "VALIDATION-v0.4.md"
       },
       {
+        "from": "docs/VALIDATION-v0.5.md",
+        "to": "VALIDATION-v0.5.md"
+      },
+      {
+        "from": "docs/LINUX.md",
+        "to": "LINUX.md"
+      },
+      {
+        "from": "docs/LOCAL-AI.md",
+        "to": "LOCAL-AI.md"
+      },
+      {
         "from": "docs/RESEARCH-METHODS.md",
         "to": "RESEARCH-METHODS.md"
+      },
+      {
+        "from": "docs/RESEARCH-TO-DELIVERY.md",
+        "to": "RESEARCH-TO-DELIVERY.md"
       },
       {
         "from": "docs/POWER-BI.md",
@@ -191,6 +207,10 @@
       {
         "from": "docs/evaluations/v0.4-local-model.json",
         "to": "evaluations/v0.4-local-model.json"
+      },
+      {
+        "from": "docs/evaluations/v0.4-item-summary-local-model.json",
+        "to": "evaluations/v0.4-item-summary-local-model.json"
       }
     ],
     "asarUnpack": [

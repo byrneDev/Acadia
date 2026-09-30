@@ -18,19 +18,36 @@ ipcRenderer.on("acadia:before-close", async () => {
 });
 
 const api: AcadiaAPI = {
+  addBoardReference: (reference) =>
+    ipcRenderer.invoke("acadia:add-board-reference", reference),
+  saveGap: (value) => ipcRenderer.invoke("acadia:save-gap", value),
+  saveDecision: (value) => ipcRenderer.invoke("acadia:save-decision", value),
   pedigreeState: () => ipcRenderer.invoke("acadia:pedigree-state"),
   saveResearchBrief: (value) => ipcRenderer.invoke("acadia:save-brief", value),
-  saveSourceAppraisal: (value) => ipcRenderer.invoke("acadia:save-appraisal", value),
-  saveOriginRelationship: (value) => ipcRenderer.invoke("acadia:save-origin", value),
-  saveFindingAssessment: (value) => ipcRenderer.invoke("acadia:save-finding", value),
-  saveAssumption: (value) => ipcRenderer.invoke("acadia:save-assumption", value),
+  saveSourceAppraisal: (value) =>
+    ipcRenderer.invoke("acadia:save-appraisal", value),
+  saveOriginRelationship: (value) =>
+    ipcRenderer.invoke("acadia:save-origin", value),
+  saveFindingAssessment: (value) =>
+    ipcRenderer.invoke("acadia:save-finding", value),
+  saveAssumption: (value) =>
+    ipcRenderer.invoke("acadia:save-assumption", value),
   saveMethod: (value) => ipcRenderer.invoke("acadia:save-method", value),
-  saveReviewIssue: (value) => ipcRenderer.invoke("acadia:save-review-issue", value),
-  pedigreeRevisions: (kind, id) => ipcRenderer.invoke("acadia:pedigree-revisions", kind, id),
-  createPedigreeSnapshot: () => ipcRenderer.invoke("acadia:create-pedigree-snapshot"),
-  getPedigreeSnapshot: (id) => ipcRenderer.invoke("acadia:get-pedigree-snapshot", id),
-  challengeAnalysis: (target) => ipcRenderer.invoke("acadia:challenge-analysis", target),
+  saveReviewIssue: (value) =>
+    ipcRenderer.invoke("acadia:save-review-issue", value),
+  pedigreeRevisions: (kind, id) =>
+    ipcRenderer.invoke("acadia:pedigree-revisions", kind, id),
+  createPedigreeSnapshot: () =>
+    ipcRenderer.invoke("acadia:create-pedigree-snapshot"),
+  getPedigreeSnapshot: (id) =>
+    ipcRenderer.invoke("acadia:get-pedigree-snapshot", id),
+  challengeAnalysis: (target) =>
+    ipcRenderer.invoke("acadia:challenge-analysis", target),
   assistMethod: (id) => ipcRenderer.invoke("acadia:assist-method", id),
+  summarizeItem: (target) =>
+    ipcRenderer.invoke("acadia:summarize-item", target),
+  acceptItemInsight: (input) =>
+    ipcRenderer.invoke("acadia:accept-item-insight", input),
   getDesktopState: () => ipcRenderer.invoke("acadia:desktop-state"),
   saveDesktopPreferences: (patch) =>
     ipcRenderer.invoke("acadia:save-desktop-preferences", patch),
@@ -129,7 +146,8 @@ const api: AcadiaAPI = {
     ipcRenderer.invoke("acadia:generate", project, kind, instructions, plan),
   exportOutput: (output, format) =>
     ipcRenderer.invoke("acadia:export-output", output, format),
-  exportProjectPlan: (output) => ipcRenderer.invoke("acadia:export-project-plan", output),
+  exportProjectPlan: (output) =>
+    ipcRenderer.invoke("acadia:export-project-plan", output),
   exportPowerBI: () => ipcRenderer.invoke("acadia:export-power-bi"),
   onBeforeClose: (callback) => {
     beforeClose = callback;

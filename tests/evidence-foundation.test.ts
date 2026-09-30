@@ -151,7 +151,7 @@ describe("normalized evidence foundation", () => {
       "[This PDF has no extractable text. OCR is not included; open the original.]";
     const positions = project.cards.map((c) => [c.x, c.y]);
     store.saveProject(project);
-    expect(project.schemaVersion).toBe(3);
+    expect(project.schemaVersion).toBe(4);
     expect(project.cards.map((c) => [c.x, c.y])).toEqual(positions);
     expect(project.cards[0].extraction).toBeUndefined();
     expect(store.getSource(project.cards[0].sourceId!).passages).toHaveLength(

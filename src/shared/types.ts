@@ -15,6 +15,7 @@ import type {
   LocalModel,
 } from "./desktop";
 import type { DeliveryPlan } from "./pmis";
+import type { BoardReference } from "./board";
 export type CardKind =
   | "note"
   | "question"
@@ -26,7 +27,16 @@ export type CardKind =
   | "video";
 export type EvidenceStatus = "unreviewed" | "supported" | "disputed";
 export type Relation =
-  "relates to" | "supports" | "contradicts" | "derived from" | "investigate";
+  | "relates to"
+  | "supports"
+  | "contradicts"
+  | "derived from"
+  | "investigate"
+  | "informs"
+  | "identifies gap"
+  | "addresses"
+  | "depends on"
+  | "produces";
 export type OutputKind =
   | "hypothesis"
   | "research-plan"
@@ -63,6 +73,7 @@ export interface ResearchCard {
   extraction?: string;
   sourceId?: string;
   methodId?: string;
+  boardReference?: BoardReference;
   createdAt: string;
   updatedAt: string;
 }
@@ -91,7 +102,7 @@ export interface ResearchOutput {
   deliveryPlan?: DeliveryPlan;
 }
 export interface Project {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 1 | 2 | 3 | 4;
   id: string;
   title: string;
   question: string;

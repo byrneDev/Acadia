@@ -11,6 +11,8 @@ import type {
   SearchHit,
 } from "../../shared/research";
 import { Modal } from "./Dialogs";
+import { ReviewerNotes } from "./ReviewerNotes";
+import { AddToBoardButton } from "./BoardMappingContext";
 import "./ResearchWorkspace.css";
 import { Policy } from "./SourceReader";
 import { subscribeResearch } from "./researchSubscription";
@@ -43,7 +45,8 @@ export type ResearchView =
   | "inquiry"
   | "discovery"
   | "brief"
-  | "methods";
+  | "methods"
+  | "flow";
 export function useResearch(projectId?: string) {
   const [research, setResearch] = useState<ResearchState>(empty);
   useEffect(() => {
@@ -102,18 +105,20 @@ export function Jobs({
                     Cancel
                   </button>
                 )}
-                {j.sourceId && ["failed", "cancelled"].includes(j.status) && (
-                  <button
-                    className="button quiet"
-                    onClick={() =>
-                      api()
-                        .reprocessSource(j.sourceId!, j.kind === "ocr")
-                        .catch(onError)
-                    }
-                  >
-                    Retry
-                  </button>
-                )}
+                {j.sourceId &&
+                  ["extract", "ocr", "capture"].includes(j.kind) &&
+                  ["failed", "cancelled"].includes(j.status) && (
+                    <button
+                      className="button quiet"
+                      onClick={() =>
+                        api()
+                          .reprocessSource(j.sourceId!, j.kind === "ocr")
+                          .catch(onError)
+                      }
+                    >
+                      Retry
+                    </button>
+                  )}
               </div>
             ))}
         </div>
@@ -177,6 +182,10 @@ interface Props {
   onConnection: (connection: Connection) => void;
   requestedClaim?: { id: string; key: number };
   onClaimRequestHandled?: () => void;
+  requestedTask?: { id: string; key: number };
+  onTaskRequestHandled?: () => void;
+  requestedAssumption?: { id: string; key: number };
+  onAssumptionRequestHandled?: () => void;
 }
 export default function ResearchWorkspace(props: Props) {
   const { project, research, view, onError, onSource, onCard, onConnection } =
@@ -206,6 +215,11 @@ export default function ResearchWorkspace(props: Props) {
   }, [project.id, query, url, question, queries]);
   useEffect(() => {
     const request = props.requestedClaim;
+    if (view === "evidence" && request?.id === "new") {
+      setClaim(newClaim());
+      props.onClaimRequestHandled?.();
+      return;
+    }
     if (
       view !== "evidence" ||
       !request ||
@@ -213,6 +227,7 @@ export default function ResearchWorkspace(props: Props) {
     )
       return;
     setHighlightedClaim(request.id);
+    setClaim(research.claims.find((entry) => entry.id === request.id));
     const frame = requestAnimationFrame(() => {
       const row = document.getElementById(`claim-${request.id}`);
       row?.scrollIntoView({ block: "center" });
@@ -226,6 +241,14 @@ export default function ResearchWorkspace(props: Props) {
     props.requestedClaim?.key,
     research.claims,
   ]);
+  useEffect(() => {
+    const request = props.requestedTask;
+    if (view !== "tasks" || !request) return;
+    const existing = research.tasks.find((entry) => entry.id === request.id);
+    if (request.id !== "new" && !existing) return;
+    setTask(existing || newTask());
+    props.onTaskRequestHandled?.();
+  }, [view, props.requestedTask?.id, props.requestedTask?.key, research.tasks]);
   useEffect(() => {
     api().hasSearchKey().then(setHasKey).catch(onError);
   }, []);
@@ -283,7 +306,10 @@ export default function ResearchWorkspace(props: Props) {
               <h2>Read the whole collection.</h2>
               <p>Originals, versions, and precise passages stay connected.</p>
             </div>
-            <span>{research.sources.length} sources</span>
+            <span>
+              {research.sources.filter((source) => !source.derived).length}{" "}
+              sources
+            </span>
           </div>
           <OriginSummary project={project} research={research} />
           <form
@@ -361,39 +387,46 @@ export default function ResearchWorkspace(props: Props) {
             </div>
           ) : (
             <div className="research-list">
-              {research.sources.map((s) => {
-                const v = research.versions.find(
-                  (v) => v.id === s.currentVersionId,
-                );
-                return (
-                  <div className="research-card source-summary" key={s.id}>
-                    <button onClick={() => onSource(s.id)}>
-                      <span className="eyebrow">
-                        {s.kind} · {s.inclusion}
-                      </span>
-                      <h3>{s.title}</h3>
-                      <p
-                        className={v?.status === "ready" ? "" : "warning-text"}
-                      >
-                        {v?.status || "Pending"} · {v?.processedUnits || 0}/
-                        {v?.totalUnits || 0} units ·{" "}
-                        {v?.method || "awaiting extraction"}
-                      </p>
-                      {s.duplicateOf && (
-                        <small>Duplicate — not independent support</small>
-                      )}
-                    </button>
-                    <Policy
-                      label={`Use ${s.title}`}
-                      value={s.inclusion}
-                      onChange={(v) =>
-                        api().setSourcePolicy(s.id, v).catch(onError)
-                      }
-                    />
-                  </div>
-                );
-              })}
-              {!research.sources.length && (
+              {research.sources
+                .filter((s) => !s.derived)
+                .map((s) => {
+                  const v = research.versions.find(
+                    (v) => v.id === s.currentVersionId,
+                  );
+                  return (
+                    <div className="research-card source-summary" key={s.id}>
+                      <button onClick={() => onSource(s.id)}>
+                        <span className="eyebrow">
+                          {s.kind} · {s.inclusion}
+                        </span>
+                        <h3>{s.title}</h3>
+                        <p
+                          className={
+                            v?.status === "ready" ? "" : "warning-text"
+                          }
+                        >
+                          {v?.status || "Pending"} · {v?.processedUnits || 0}/
+                          {v?.totalUnits || 0} units ·{" "}
+                          {v?.method || "awaiting extraction"}
+                        </p>
+                        {s.duplicateOf && (
+                          <small>Duplicate — not independent support</small>
+                        )}
+                      </button>
+                      <AddToBoardButton
+                        reference={{ kind: "source", id: s.id }}
+                      />
+                      <Policy
+                        label={`Use ${s.title}`}
+                        value={s.inclusion}
+                        onChange={(v) =>
+                          api().setSourcePolicy(s.id, v).catch(onError)
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              {!research.sources.some((source) => !source.derived) && (
                 <p className="research-empty">
                   Import documents, capture a website, or add notes to begin.
                 </p>
@@ -456,7 +489,18 @@ export default function ResearchWorkspace(props: Props) {
                       </button>
                       <p>{c.question}</p>
                       <span className="eyebrow">{c.status}</span>
+                      {c.itemReview && (
+                        <p className="subtle-note">
+                          Reviewer Notes · human accepted
+                        </p>
+                      )}
                       <div className="small-actions">
+                        <AddToBoardButton
+                          reference={{
+                            kind: c.itemReview ? "review" : "claim",
+                            id: c.id,
+                          }}
+                        />
                         <button onClick={() => setAssessmentClaim(c.id)}>
                           Assess finding
                         </button>
@@ -527,6 +571,8 @@ export default function ResearchWorkspace(props: Props) {
             research={research}
             onError={onError}
             onSource={onSource}
+            requestedAssumption={props.requestedAssumption}
+            onAssumptionRequestHandled={props.onAssumptionRequestHandled}
           />
         </>
       )}
@@ -553,19 +599,23 @@ export default function ResearchWorkspace(props: Props) {
                   {research.tasks
                     .filter((t) => t.status === status)
                     .map((t) => (
-                      <button
-                        className="research-card"
-                        key={t.id}
-                        onClick={() => setTask(t)}
-                      >
-                        <h3>{t.title}</h3>
+                      <article className="research-card" key={t.id}>
+                        <button
+                          className="claim-title"
+                          onClick={() => setTask(t)}
+                        >
+                          <h3>{t.title}</h3>
+                        </button>
                         <p>{t.question}</p>
                         <small>
                           {t.criterion || "Add completion criteria"}
                         </small>
                         {t.dueDate && <span>Due {t.dueDate}</span>}
                         <span>{t.sourceIds.length} resulting sources</span>
-                      </button>
+                        <AddToBoardButton
+                          reference={{ kind: "task", id: t.id }}
+                        />
+                      </article>
                     ))}
                 </section>
               ),
@@ -960,6 +1010,19 @@ export default function ResearchWorkspace(props: Props) {
                 onChange={(e) => setClaim({ ...claim, title: e.target.value })}
               />
             </label>
+            {claim.itemReview && (
+              <ReviewerNotes
+                claims={[claim]}
+                onCitation={(citation) => {
+                  setClaim(undefined);
+                  onSource(
+                    citation.sourceId,
+                    citation.versionId,
+                    citation.passageId,
+                  );
+                }}
+              />
+            )}
             <label className="field">
               Question
               <textarea
@@ -1009,6 +1072,7 @@ export default function ResearchWorkspace(props: Props) {
               Board item
               <select
                 value={claim.cardId || ""}
+                disabled={Boolean(claim.itemReview)}
                 onChange={(e) =>
                   setClaim({ ...claim, cardId: e.target.value || undefined })
                 }
@@ -1071,18 +1135,20 @@ export default function ResearchWorkspace(props: Props) {
               </div>
             ))}
             <div className="modal-actions">
-              <button
-                type="button"
-                className="button danger"
-                onClick={() =>
-                  action(async () => {
-                    await api().deleteClaim(claim.id);
-                    setClaim(undefined);
-                  })
-                }
-              >
-                Delete claim
-              </button>
+              {!claim.itemReview && (
+                <button
+                  type="button"
+                  className="button danger"
+                  onClick={() =>
+                    action(async () => {
+                      await api().deleteClaim(claim.id);
+                      setClaim(undefined);
+                    })
+                  }
+                >
+                  Delete claim
+                </button>
+              )}
               <button className="button primary" disabled={working}>
                 Save assessment
               </button>

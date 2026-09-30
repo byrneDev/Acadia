@@ -27,6 +27,8 @@ An entire workspace profile or portable project is usually unnecessary and may e
 | The second display is empty or shows an older report          | Save and release a revision explicitly. Working drafts do not automatically replace the released snapshot.                                                                             |
 | An analysis API key disappears after restart                  | A usable operating-system secure-storage backend may be unavailable. Analysis keys remain session-only in that case; saving a Brave Search key instead requires usable secure storage. |
 | A Linux package will not start                                | Use the [Linux troubleshooting guide](docs/LINUX.md); include distribution, desktop session, package type, and the visible error in your report.                                       |
+| An older Acadia cannot open a new archive | V0.5.0 writes portable format v4. Open it with v0.5.0 or later; earlier formats remain importable. Keep an independent backup before upgrading. |
+| A linked board item is unavailable | Its underlying record is missing. The placement and connections remain saved; inspect the corresponding workspace or restore a recovery archive. Removing a linked card does not delete its research record. |
 
 ## Backups and platform expectations
 

@@ -1,0 +1,249 @@
+.item-insight-context {
+  padding: 14px 16px;
+  background: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.item-insight-context > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.item-insight-context p {
+  margin: 7px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.item-insight-context small,
+.item-insight-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+.item-insight-intro {
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 16px 0;
+  color: var(--muted);
+}
+.item-insight-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 18px 0;
+}
+.item-insight-notice {
+  padding: 12px 14px;
+  border-left: 3px solid var(--amber);
+  background: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 14px 0;
+}
+.item-insight-notice p {
+  margin-top: 0;
+}
+.item-insight-progress {
+  padding: 12px 0;
+  font-size: 13px;
+}
+.item-insight-progress progress {
+  width: 100%;
+  accent-color: var(--phosphor);
+}
+.item-insight-progress small {
+  color: var(--muted);
+}
+.item-insight-result {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.item-insight-result-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.item-insight-result-heading h3 {
+  margin: 0;
+  font-size: 17px;
+}
+.item-insight-result-heading span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.item-insight-result > .field {
+  margin-top: 14px;
+}
+.item-insight-coverage,
+.item-insight-citations {
+  margin: 16px 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.item-insight-coverage summary,
+.item-insight-citations summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.item-insight-coverage ul {
+  padding-left: 22px;
+  color: var(--muted);
+}
+.item-insight-markdown {
+  font-size: 14px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.item-insight-markdown h1 {
+  font-size: 21px;
+}
+.item-insight-markdown h2 {
+  margin: 24px 0 10px;
+  font-size: 18px;
+}
+.item-insight-markdown h3 {
+  margin: 18px 0 8px;
+  font-size: 15px;
+}
+.item-insight-markdown :is(ul, ol) {
+  padding-left: 24px;
+}
+.item-insight-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.item-insight-markdown :is(td, th) {
+  border: 1px solid var(--line);
+  padding: 8px;
+  text-align: left;
+}
+.item-insight-markdown pre {
+  white-space: pre-wrap;
+  padding: 12px;
+  background: var(--ink-2);
+}
+.item-insight-citation {
+  display: inline;
+  color: var(--phosphor);
+  text-decoration: underline;
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+.item-insight-source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  margin-top: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.item-insight-source:hover {
+  background: var(--panel-lift);
+}
+.item-insight-source span,
+.item-insight-source q {
+  color: var(--muted);
+}
+.item-insight-source q {
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.item-insight-footnote {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 20px 0 0;
+}
+.research-card .card-ai-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  min-height: 30px;
+  min-width: 30px;
+}
+.research-card .card-ai-action:hover {
+  color: var(--phosphor);
+  background: var(--ink-2);
+}
+.card-heading .card-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.inspector .item-insight-trigger {
+  margin: 13px 0;
+}
+.item-review-form,
+.reviewer-notes {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.item-review-form > p,
+.reviewer-notes > p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.item-review-form textarea {
+  min-height: 220px;
+  line-height: 1.65;
+  resize: vertical;
+}
+.item-review-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 14px 0;
+}
+.item-review-confirm input {
+  width: auto;
+  margin-top: 4px;
+  accent-color: var(--phosphor);
+}
+.item-review-accepted {
+  color: var(--phosphor);
+  padding: 12px 0;
+  font-size: 14px;
+}
+.reviewer-notes h3 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+.reviewer-notes details {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.reviewer-notes summary {
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.reviewer-notes .item-insight-meta {
+  line-height: 1.6;
+}
+.reviewer-notes .text-button {
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: normal;
+  line-height: 1.6;
+}
+.inspector .reviewer-notes .item-insight-markdown {
+  font-size: 12px;
+}
+.inspector .reviewer-notes .item-insight-markdown h2 {
+  font-size: 14px;
+}
