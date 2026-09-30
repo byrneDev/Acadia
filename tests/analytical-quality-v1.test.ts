@@ -145,6 +145,10 @@ it("fits the complete Cedar challenge in the local context budget without duplic
         expect(input.source_passages).toHaveLength(120);
         expect(body.options.num_ctx).toBeLessThanOrEqual(65536);
         expect(JSON.stringify(body.format).length).toBeLessThan(2500);
+        // A tiny local probe of the otherwise identical schema returned HTTP400
+        // "failed to parse grammar" with large maxLength constraints, and HTTP200
+        // without them. Keep provider grammar portable; server limits still apply.
+        expect(JSON.stringify(body.format)).not.toContain("maxLength");
         expect(
           body.format.properties.issues.items.properties.category.enum,
         ).toContain("causal-inference");

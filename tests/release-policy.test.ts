@@ -78,6 +78,8 @@ function acceptance() {
             "supportReview",
             "contradictionHandling",
             "abstention",
+            "quotationValidity",
+            "responseReliability",
           ].map((key) => [
             key,
             { status: "passed", evidence: `Synthetic ${key} evidence only` },
@@ -168,6 +170,17 @@ describe("production release gates", () => {
     const g = acceptance();
     g.modelEvaluations[0].dimensions.abstention.status = "pending";
     expect(() => validateAcceptance(g, "1.0.0", commit)).toThrow(/abstention/);
+    const quotation = acceptance();
+    delete quotation.modelEvaluations[0].dimensions.quotationValidity;
+    expect(() => validateAcceptance(quotation, "1.0.0", commit)).toThrow(
+      /quotation validity/,
+    );
+    const reliability = acceptance();
+    reliability.modelEvaluations[0].dimensions.responseReliability.status =
+      "pending";
+    expect(() => validateAcceptance(reliability, "1.0.0", commit)).toThrow(
+      /response reliability/,
+    );
     const h = acceptance();
     h.modelEvaluations[0].runs = 1;
     expect(() => validateAcceptance(h, "1.0.0", commit)).toThrow(/repeated/);

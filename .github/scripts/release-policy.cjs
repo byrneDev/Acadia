@@ -205,10 +205,12 @@ function validateAcceptance(value, version, sourceCommit) {
         "supportReview",
         "contradictionHandling",
         "abstention",
+        "quotationValidity",
+        "responseReliability",
       ].some((key) => !evidence(evaluation.dimensions?.[key]))
     )
       throw new Error(
-        `Advertised model ${model} needs a separately reviewed, repeated evaluation of retrieval, support, contradiction handling and abstention.`,
+        `Advertised model ${model} needs a separately reviewed, repeated evaluation of retrieval, support, contradiction handling, abstention, quotation validity and response reliability.`,
       );
   }
   return value;

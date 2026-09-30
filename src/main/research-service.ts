@@ -161,14 +161,16 @@ function challengeResponseSchema(
   citations: Citation[],
   snapshot: SnapshotAnalysisContext,
 ): Record<string, unknown> {
-  const text = { type: "string", maxLength: 30_000 };
+  // Ollama's grammar compiler rejects large maxLength expansions. Keep shape
+  // constraints here; validateChallengeProposal enforces all text-size limits.
+  const text = { type: "string" };
   const refs = (values: string[]) => ({
     type: "array",
     maxItems: values.length ? 200 : 0,
     uniqueItems: true,
     // Exact allowed identifiers are already present in the input and checked
     // after generation. Repeating large ID inventories here wastes context.
-    items: { type: "string", maxLength: 200 },
+    items: { type: "string" },
   });
   return {
     type: "object",
@@ -203,7 +205,7 @@ function challengeResponseSchema(
                 "assumption",
               ],
             },
-            summary: { type: "string", maxLength: 2000 },
+            summary: text,
             detail: text,
             passageIds: refs(citations.map((c) => c.passageId)),
             claimIds: refs(snapshot.claims.map((c) => c.id)),

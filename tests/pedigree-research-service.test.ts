@@ -275,8 +275,8 @@ describe("on-demand critical research with fixed contradictory fixtures", () => 
               ]);
               expect(issue.properties.passageIds.items).toEqual({
                 type: "string",
-                maxLength: 200,
               });
+              expect(JSON.stringify(request.format)).not.toContain("maxLength");
               expect(issue.properties.claimIds.items.enum).toBeUndefined();
               expect(issue.properties.assumptionIds.maxItems).toBe(0);
               expect(
