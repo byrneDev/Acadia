@@ -388,32 +388,36 @@ describe("v1 production research boundaries", () => {
     expect(() => store.getSourcePassagesPage(other.id, "long")).toThrow(
       /another investigation/,
     );
-    for (let i = 0; i < 105; i++)
-      store.saveRun({
-        id: `run-${i}`,
-        projectId: project.id,
-        question: project.question,
-        instructions: "PRIVATE FULL INSTRUCTIONS",
-        kind: "fixture",
-        createdAt: stamp,
-        provider: "fixture",
-        model: "fixture",
-        templateVersion: "v1",
-        citations: [],
-        exclusions: [],
-        sourceVersions: [],
-        response: "PRIVATE FULL RESPONSE",
-        status: "completed",
-        requests: [
-          {
-            provider: "fixture",
-            endpoint: "http://127.0.0.1",
-            model: "fixture",
-            messages: [{ role: "user", content: "PRIVATE PROMPT" }],
-            parameters: {},
-          },
-        ],
-      });
+    // Build synthetic history as one import; the reads below still exercise
+    // committed state. Individual fsync latency is not the paging contract.
+    store.transaction(() => {
+      for (let i = 0; i < 105; i++)
+        store.saveRun({
+          id: `run-${i}`,
+          projectId: project.id,
+          question: project.question,
+          instructions: "PRIVATE FULL INSTRUCTIONS",
+          kind: "fixture",
+          createdAt: stamp,
+          provider: "fixture",
+          model: "fixture",
+          templateVersion: "v1",
+          citations: [],
+          exclusions: [],
+          sourceVersions: [],
+          response: "PRIVATE FULL RESPONSE",
+          status: "completed",
+          requests: [
+            {
+              provider: "fixture",
+              endpoint: "http://127.0.0.1",
+              model: "fixture",
+              messages: [{ role: "user", content: "PRIVATE PROMPT" }],
+              parameters: {},
+            },
+          ],
+        });
+    });
     const state = store.state(project.id, { lightweight: true });
     expect(state.runCount).toBe(105);
     expect(state.runs).toHaveLength(100);
@@ -559,10 +563,14 @@ describe("v1 production research boundaries", () => {
     );
     expect(appendix.markdown).toContain(insight.runId);
     const completed = store.getAnalysisRun(project.id, insight.runId);
-    for (let index = 0; index < 105; index++) {
-      const { itemInsight: _insight, ...record } = completed;
-      store.saveRun({ ...record, id: `newer-run-${index}`, kind: "fixture" });
-    }
+    // Seed enough committed runs to move the accepted review out of the
+    // routine window without measuring 105 unrelated durable writes.
+    store.transaction(() => {
+      for (let index = 0; index < 105; index++) {
+        const { itemInsight: _insight, ...record } = completed;
+        store.saveRun({ ...record, id: `newer-run-${index}`, kind: "fixture" });
+      }
+    });
     const currentBrief = store.pedigreeState(project.id).briefs[0];
     store.saveBrief({
       ...currentBrief,

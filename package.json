@@ -267,6 +267,10 @@
       {
         "from": "docs/evaluations/v1-local-model-challenge-retry.json",
         "to": "evaluations/v1-local-model-challenge-retry.json"
+      },
+      {
+        "from": "docs/evaluations/v1-local-model-challenge-final.json",
+        "to": "evaluations/v1-local-model-challenge-final.json"
       }
     ],
     "asarUnpack": [

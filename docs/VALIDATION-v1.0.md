@@ -34,7 +34,20 @@ The [evaluation after stricter response validation](evaluations/v1-local-model.j
 
 The [follow-up after prompt/interface clarification](evaluations/v1-local-model-interface.json) retained the same retrieval checks and produced **one accepted response out of three**: the Q&A response passed citation/quotation checks and set the insufficient-evidence flag. The report was rejected for nonliteral quotations. The challenge was blocked before transmission because repeating evidence identifiers in its response schema exceeded the local context budget. Removing the redundant identifier inventories retained exact server-side validation and brought the complete fixture within budget. A [challenge-only retry](evaluations/v1-local-model-challenge-retry.json) then received HTTP 400 from Ollama before producing text. A small synthetic diagnostic isolated the provider error to large string-length grammar constraints; those limits remain enforced by Acadia after generation and are no longer expanded in the provider schema. These intermediate failures remain part of the record.
 
+The [final challenge-only check](evaluations/v1-local-model-challenge-final.json) ran from 14:28:00.686 to 14:33:07.797 UTC on September 30, 2026 (**307.111 seconds**). It fit the application context budget, used the revised schema and retained all four critical passages, but failed with `Could not connect to the AI endpoint without redirects.` No model response or challenge proposal was saved. The underlying transport/timeout cause was not established. Report and Q&A were deliberately not rerun, and there was no subsequent retry. This is follow-up development-tree evidence for the frozen candidate source, not a claim that the packaged candidate passed a model evaluation.
+
 Support review, semantic contradiction handling and abstention remain **not reviewed** in the saved rubric. Retrieving contrary evidence is separate from explaining it correctly, and an insufficient-evidence flag alone cannot establish semantic abstention quality. The complete Acadia/model workflow has not passed all three operations in one recorded run; the result does not isolate model capability from application prompt/interface design. No human semantic review or research-quality certification is claimed. A connection or simple JSON compatibility check does not establish reliability for these research tasks.
+
+The six qualification dimensions are reported separately:
+
+| Dimension | Observed result for the recorded local configuration |
+| --- | --- |
+| Retrieval | All four critical passages retained; failed extraction excluded; shared origin and omitted pins disclosed. |
+| Quotation validity | Nonliteral report quotations were rejected; the later Q&A passed its citation/quotation checks. This does not establish evidential support. |
+| Support assessment | Independent human review has not been performed. |
+| Contradiction handling | Counterevidence reached the model; no accepted final challenge demonstrated its analytical handling. Human review remains pending. |
+| Abstention | The later Q&A explicitly flagged insufficient evidence; semantic adequacy remains unreviewed. |
+| Response reliability | The strict-validation run accepted 0/3 responses; the clarified-interface run accepted 1/3; the final challenge-only check failed in transport. This configuration is not qualified. |
 
 ## Required external qualification
 
