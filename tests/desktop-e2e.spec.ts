@@ -236,9 +236,9 @@ test("model discovery and connection buttons send only deliberate read-only inve
     await dialog
       .getByRole("button", { name: "Find installed models", exact: true })
       .click();
-    await expect(dialog.getByRole("status")).toHaveText(
-      "Installed models found. Choose one below.",
-    );
+    await expect(
+      dialog.getByRole("status").filter({ hasText: "Installed models found" }),
+    ).toHaveText("Installed models found. Choose one below.");
     await dialog
       .getByLabel("Installed models", { exact: true })
       .selectOption("acadia-test:local");
@@ -249,12 +249,12 @@ test("model discovery and connection buttons send only deliberate read-only inve
     await dialog
       .getByRole("button", { name: "Test connection", exact: true })
       .click();
-    await expect(dialog.getByRole("status")).toContainText(
-      "Service reachable and selected model listed",
-    );
-    await expect(dialog.getByRole("status")).toContainText(
-      "generation and billing availability have not been tested",
-    );
+    await expect(
+      dialog.getByRole("status").filter({ hasText: "Service reachable" }),
+    ).toContainText("Service reachable and selected model listed");
+    await expect(
+      dialog.getByRole("status").filter({ hasText: "Service reachable" }),
+    ).toContainText("generation and billing availability have not been tested");
     expect(requests).toEqual([
       { method: "GET", url: "/api/tags", authorization: undefined, body: "" },
       { method: "GET", url: "/api/tags", authorization: undefined, body: "" },
@@ -301,8 +301,8 @@ test("native appearance and window geometry survive restart while audience mutat
       return bounds;
     });
     const savedBounds = async () =>
-      JSON.parse(await readFile(join(profile, "desktop.json"), "utf8"))
-        .windows?.collector?.bounds;
+      JSON.parse(await readFile(join(profile, "desktop.json"), "utf8")).windows
+        ?.collector?.bounds;
     await expect.poll(savedBounds).toEqual(initialBounds);
     const bounds = await session.app.evaluate(({ BrowserWindow, screen }) => {
       const window = BrowserWindow.getAllWindows().find(

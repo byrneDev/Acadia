@@ -4,6 +4,12 @@ const os = require("node:os");
 const { createHash } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 
+const {
+  releasePolicy,
+  debianVersion,
+  validateAcceptance,
+  verifyNativeSigning,
+} = require("./release-policy.cjs");
 const packageInfo = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
 const version = process.env.ACADIA_RELEASE_VERSION || packageInfo.version;
@@ -16,6 +22,14 @@ if (
   lock.packages?.[""]?.version !== version
 )
   throw new Error("Release, package and lockfile versions must match.");
+const policy = releasePolicy(
+  version,
+  process.env.ACADIA_SIGN_CANDIDATE === "true",
+);
+const sourceCommit =
+  process.env.GITHUB_SHA ||
+  execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const assuranceName = (platform) => `ASSURANCE-${platform}.json`;
 const releaseNotes = `docs/RELEASE-v${version}.md`;
 const directory = path.resolve("release-assets");
 const names = {
@@ -81,10 +95,36 @@ function metadata() {
   if (process.env.GITHUB_OUTPUT)
     fs.appendFileSync(
       process.env.GITHUB_OUTPUT,
-      `version=${version}\ntag=${tag}\npublish=${publish}\nnotes=${releaseNotes}\n`,
+      `version=${version}\ntag=${tag}\npublish=${publish}\nnotes=${releaseNotes}\nprerelease=${policy.prerelease}\nproduction=${policy.production}\nsigning=${policy.signingRequired}\n`,
     );
   console.log(
     `Validated ${tag}, ${releaseNotes}, and its declared bundled resources.`,
+  );
+}
+
+function acceptance() {
+  if (!policy.production) {
+    console.log(
+      "External production acceptance is not required for this explicitly non-production version.",
+    );
+    return;
+  }
+  let value;
+  try {
+    value = JSON.parse(process.env.ACADIA_RELEASE_ACCEPTANCE || "");
+  } catch {
+    throw new Error(
+      "Stable 1.x publication requires ACADIA_RELEASE_ACCEPTANCE JSON in the protected production-release environment.",
+    );
+  }
+  validateAcceptance(value, version, sourceCommit);
+  fs.mkdirSync("release-evidence", { recursive: true });
+  fs.writeFileSync(
+    "release-evidence/production-acceptance.json",
+    JSON.stringify(value, null, 2) + "\n",
+  );
+  console.log(
+    "Validated production acceptance for the exact release commit, all required external checks and five independent testers.",
   );
 }
 
@@ -136,7 +176,7 @@ function validateLinuxPackages(releaseDirectory) {
   const deb = path.join(releaseDirectory, debName);
   for (const [field, expected] of [
     ["Package", "acadia"],
-    ["Version", version],
+    ["Version", debianVersion(version)],
     ["Architecture", "amd64"],
   ]) {
     const actual = execFileSync("dpkg-deb", ["--field", deb, field], {
@@ -203,6 +243,33 @@ async function stage() {
   if (platform === "linux-x64") validateLinuxPackages(releaseDirectory);
   fs.mkdirSync(directory, { recursive: true });
   const lines = [];
+  const installers =
+    platform === "windows-x64"
+      ? fs.readdirSync(releaseDirectory).filter((name) => name.endsWith(".exe"))
+      : [];
+  if (platform === "windows-x64" && installers.length !== 1)
+    throw new Error(
+      "Expected exactly one Windows installer for signature verification.",
+    );
+  const signing = policy.signingRequired
+    ? verifyNativeSigning(
+        releaseDirectory,
+        platform,
+        installers[0] && path.join(releaseDirectory, installers[0]),
+      )
+    : { status: "not-required", checks: [] };
+  const assurance = {
+    schemaVersion: 1,
+    version,
+    sourceCommit,
+    platform,
+    production: policy.production,
+    signingRequired: policy.signingRequired,
+    signing,
+  };
+  const assuranceFile = path.join(directory, assuranceName(platform));
+  fs.writeFileSync(assuranceFile, JSON.stringify(assurance, null, 2) + "\n");
+  lines.push(`${await digest(assuranceFile)}  ${assuranceName(platform)}`);
   for (const name of names[platform]) {
     let source = path.join(releaseDirectory, name);
     if (platform === "windows-x64" && !fs.existsSync(source)) {
@@ -230,7 +297,10 @@ async function stage() {
 }
 
 async function verify() {
-  const expectedFiles = Object.values(names).flat();
+  const expectedFiles = [
+    ...Object.values(names).flat(),
+    ...Object.keys(names).map(assuranceName),
+  ];
   const expectedManifests = Object.keys(names).map(manifestName);
   const actualFiles = fs.readdirSync(directory).sort();
   const expected = [...expectedFiles, ...expectedManifests].sort();
@@ -240,7 +310,24 @@ async function verify() {
     );
   }
   const combined = [];
-  for (const [platform, artifacts] of Object.entries(names)) {
+  for (const [platform, downloads] of Object.entries(names)) {
+    const artifacts = [...downloads, assuranceName(platform)];
+    const assurance = JSON.parse(
+      fs.readFileSync(path.join(directory, assuranceName(platform)), "utf8"),
+    );
+    if (
+      assurance.version !== version ||
+      assurance.sourceCommit !== sourceCommit ||
+      assurance.platform !== platform ||
+      assurance.production !== policy.production ||
+      assurance.signingRequired !== policy.signingRequired ||
+      (policy.signingRequired &&
+        assurance.signing?.status !==
+          (platform === "linux-x64" ? "not-applicable" : "verified"))
+    )
+      throw new Error(
+        `Missing or mismatched release assurance for ${platform}.`,
+      );
     const lines = fs
       .readFileSync(path.join(directory, manifestName(platform)), "utf8")
       .trim()
@@ -275,10 +362,10 @@ async function verify() {
 }
 
 const command = process.argv[2];
-if (!["metadata", "stage", "verify"].includes(command))
-  throw new Error("Use metadata, stage or verify.");
+if (!["metadata", "acceptance", "stage", "verify"].includes(command))
+  throw new Error("Use metadata, acceptance, stage or verify.");
 Promise.resolve()
-  .then(() => ({ metadata, stage, verify })[command]())
+  .then(() => ({ metadata, acceptance, stage, verify })[command]())
   .catch((error) => {
     console.error(error.message);
     process.exitCode = 1;

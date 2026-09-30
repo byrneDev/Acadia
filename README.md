@@ -20,7 +20,7 @@ Acadia is a desktop research workspace for turning a collection of documents, li
 
 **The Collector** is your working space. **The Releaser** is where findings become editable reports and explicitly released presentations. A separate display can show a finished revision while you continue investigating privately.
 
-Acadia is an **early-access 0.x application** for one researcher. It runs locally without an account. AI is optional: the offline engine organizes evidence, while a separately configured local or cloud model can draft analysis.
+This branch is **Acadia 1.0.0-rc.1**, a release candidate for one researcher. **V0.5.0 remains the published release**; RC source changes and local tests do not establish a production v1 release. It runs locally without an account. AI is optional: the offline engine organizes evidence, while a separately configured local or cloud model can draft analysis.
 
 ## Download and start
 
@@ -32,9 +32,9 @@ Get the package for your computer from [GitHub Releases](https://github.com/byrn
 | macOS, Apple Silicon | ZIP containing `Acadia.app`                | Extract the app and move it to Applications.           |
 | Windows, x64         | NSIS installer; ZIP handoff where provided | Extract the ZIP if applicable, then run the installer. |
 
-Current builds are unsigned; the macOS app is not notarized. Read the release notes before installing. Intel Mac, Linux ARM, and other Linux distributions are not release targets for 0.5.0. See [Support](SUPPORT.md) for platform and troubleshooting expectations.
+The published v0.5.0 packages are unsigned and the macOS app is not notarized. Candidate packages must state their own signing status. Stable v1 publication is blocked pending verified distribution signing/notarization and external acceptance; no production signing or tenant/hardware acceptance is claimed here. Intel Mac, Linux ARM, and other Linux distributions are not release targets. See [Support](SUPPORT.md) for platform and troubleshooting expectations.
 
-Start with the included [fictional library-hours investigation](docs/samples/Library-hours-sample.acadia), or create a project and enter the question you want to investigate. No API key is needed to collect, search, organize, edit, or export research.
+In the RC, open **Workspace guide** to create a separate fictional software or curriculum practice investigation. The original project stays in your library; practice records are explicitly unreviewed. You can also start with the included [fictional library-hours investigation](docs/samples/Library-hours-sample.acadia), or create a project and enter the question you want to investigate. No API key is needed to collect, search, organize, edit, or export research.
 
 ## Two spaces, one investigation
 
@@ -44,7 +44,7 @@ Start with the included [fictional library-hours investigation](docs/samples/Lib
 - **Methods:** use five editable worksheets for competing hypotheses, SWOT, root causes, risk and technology readiness. Link evidence, assumptions and gap tasks; request AI review explicitly.
 - **Board:** use the grouped, searchable **Add item** picker to map questions, sources, reviewed evidence, findings, gaps, tasks and deliverables. Linked cards open their source reader or authoritative editor; saved edits update their previews. Place all five method worksheets, draw labeled relationships, organize named areas and save useful views.
 - **Item AI advice:** explicitly summarize a collected item or saved source version and get suggested research uses, limitations, and next steps. Edit and accept the proposal into **Reviewer Notes** to save it as linked evidence, retaining historical citations and your acceptance record. Original item notes remain intact.
-- **Sources:** read searchable PDF, Word, text, and captured web passages with page or paragraph locations, acquisition dates, and source versions. Use local English OCR for scanned PDFs and images.
+- **Sources:** read searchable PDF, Word, text, and captured web passages with page or paragraph locations, acquisition dates, and source versions. Use local English OCR for scanned PDFs and images; compare a PDF passage against its original historical page.
 - **Evidence:** compare supporting passages, contradictions, alternative explanations, and researcher assessments without treating a drawn connection as proof.
 - **Tasks:** connect follow-up work to a question or gap, with completion criteria, status, optional dates, and resulting sources.
 - **Gaps & decisions:** record missing information, resolution criteria, related work, proposed actions, alternatives, assumptions and deliverables. Changes receive revisions; resolving a gap or making a decision remains a researcher action.
@@ -53,7 +53,7 @@ Start with the included [fictional library-hours investigation](docs/samples/Lib
 
 ### Releaser — make the reasoning reviewable
 
-Draft a decision brief, hypothesis, research plan, whitepaper, gap analysis, or needs analysis. Edit headings, lists, tables, and numbered citations. Request a proposed revision to selected text and review it before applying it.
+Draft a decision brief, hypothesis, research plan, whitepaper, gap analysis, or needs analysis. Edit headings, lists, tables, and numbered citations. **Cite source passage** inserts a saved passage reference into manual writing without calling AI. Request a proposed revision to selected text and review it before applying it.
 
 Save report revisions and choose exactly which one to release. Working drafts stay private to the main window; the second display receives the selected released snapshot. Export an editable **DOCX**, a print-oriented **PDF**, or **Markdown**, including bibliography and source locations.
 
@@ -65,19 +65,25 @@ SQLite full-text search covers the indexed collection. A model still receives a 
 
 ## Desktop workspace
 
-The OS-aware shell introduced in v0.4 is retained in v0.5: system/light/dark themes, a compact navigation sidebar, contextual source reading, and a report-focused editor. Board and report positions survive view switches. Platform menus, keyboard commands, named connection presets, and deliberate model checks reduce setup friction. See the [desktop GUI notes](docs/GUI-REFRESH.md) for behavior and the [v0.5 validation record](docs/VALIDATION-v0.5.md) for the platforms actually tested.
+The OS-aware shell introduced in v0.4 is retained in the RC: system/light/dark themes, a compact navigation sidebar, contextual source reading, and a report-focused editor. Board and report positions survive view switches. Platform menus, keyboard commands, named connection presets, and deliberate model checks reduce setup friction. See the [desktop GUI notes](docs/GUI-REFRESH.md) for behavior and [v1 validation](docs/VALIDATION-v1.0.md) for current candidate checks and outstanding gates.
 
 ## Research methods, delivery plans and data exports
 
 Versioned source appraisals, shared-origin review, structured findings and assumptions were introduced in v0.4 and remain available. Inspect the reasoning behind a conclusion and the observation that could change it. Preview an editable pedigree appendix and acknowledge analytical limitations before release. See [Research methods](docs/RESEARCH-METHODS.md).
 
-After analysis, **Plan a deliverable** turns a supported gap into a reviewable software, curriculum or other project plan. Edit work packages and export a PMIS handoff for Monday, Jira or Microsoft Planner. Use **Export data for Power BI** for linked research and delivery tables with a [data dictionary and relationship guide](docs/POWER-BI.md). Exports are local files; they do not publish data or connect to your tenant automatically.
+After analysis, **Plan a deliverable** proposes a reviewable software, curriculum or other project plan. Link saved gap/finding revisions, requirements or learning objectives, acceptance tests, and exact verification passages. Completing work does not resolve the gap automatically. Private work-package drafts survive restart; review the [PMIS mapping preview and repeated-import limits](docs/PMIS-HANDOFF.md) before exporting for Monday, Jira or Microsoft Planner. Use **Export data for Power BI** for linked research and delivery tables with a [data dictionary and relationship guide](docs/POWER-BI.md). Exports are local files; they do not publish data or connect to your tenant automatically.
 
 New in **v0.5.0**, the grouped **Add item** picker follows **Question → Sources → Reviewed Evidence → Findings → Gaps → Tasks → Deliverables**. Search for a type, create a record in its workspace, or place an existing record on the free canvas. Per-item AI advice can be edited and explicitly accepted into Reviewer Notes and Evidence. Linked cards open their authoritative editor; removing a placement keeps the research record. See [Research-to-delivery boards](docs/RESEARCH-TO-DELIVERY.md).
 
-Acadia v0.5 exports use **portable format v4**, preserving linked board records, gap/decision revisions and earlier evidence history. Import of formats v1–v3 remains supported. **V4 requires Acadia v0.5 or later**; v0.4 cannot read it. Export important investigations and keep an independent backup before upgrading. See [v0.5 validation](docs/VALIDATION-v0.5.md) for checks and limitations.
+The RC exports **portable format v5**, requiring Acadia v1.0 or its v1 prereleases. Formats v1–v4 remain importable with missing assessments left unassessed. V0.5 cannot open v5. The new format retains private drafts, delivery references, and historical evidence. Use **Backup, recovery and updates** to make a checked whole-library backup before upgrading. See [Recovery](docs/RECOVERY.md) and [v1 validation](docs/VALIDATION-v1.0.md).
+
+The candidate also adds paginated collection/source/history search, keyboard movement of selected board items, saved private research drafts with conflict handling, explicit synthetic model-generation tests, credential status/removal, redacted support diagnostics, and a manual update check. These maintenance actions do not upload research or install updates.
 
 ## A look inside
+
+![Fictional software investigation in the v1 candidate](docs/screenshots/v1.0/software-practice.png)
+
+_V1 candidate: practice with conflicting sources, an unreviewed finding, an open gap, research tasks, a proposed decision and a deliverable. The guide also includes a curriculum investigation; neither requires AI._
 
 ![Grouped, searchable Add item picker for the research-to-delivery workflow](docs/screenshots/v0.5/board-items.png)
 
@@ -143,9 +149,9 @@ Packaging commands and release verification are in [Releasing](docs/RELEASING.md
 
 ## Quality and current boundaries
 
-Automated checks cover document extraction beyond the old page/card cutoffs, contradictory evidence, duplicate handling, source version round trips, privacy enforcement, approved search plans, citation validation, report revisions, real document exports, reviewed item advice and linked board records. Native checks use disposable profiles. See the [v0.5 validation record](docs/VALIDATION-v0.5.md) for current checks and their limits. [V0.4 validation](docs/VALIDATION-v0.4.md) preserves the earlier research-methods evaluation, including rejected model responses; [v0.3 validation](docs/VALIDATION-v0.3.md) records earlier platform results. Consult each release for the results of its exact build.
+Automated checks cover document extraction beyond the old page/card cutoffs, contradictory evidence, duplicate handling, source version round trips, privacy enforcement, approved search plans, citation validation, report revisions, real document exports, reviewed item advice and linked board records. Native checks use disposable profiles. See [v1 validation](docs/VALIDATION-v1.0.md) for candidate checks and outstanding gates, and [v0.5 validation](docs/VALIDATION-v0.5.md) for the published version. [V0.4 validation](docs/VALIDATION-v0.4.md) preserves the earlier research-methods evaluation, including rejected model responses; [v0.3 validation](docs/VALIDATION-v0.3.md) records earlier platform results. Consult each release for the results of its exact build.
 
-Printed English OCR needs review against the original. Login-dependent pages, arbitrary media codecs, very large investigations, and every possible document layout are not guaranteed. Files are bounded to 250 MB each and portable archives to approximately 1 GB. Physical touchscreens, mixed-DPI monitors, and presentation hardware need testing on your setup.
+Printed English OCR needs review against the original. Login-dependent pages, arbitrary media codecs, very large investigations, and every possible document layout are not guaranteed. Files are bounded to 250 MB each and portable archives to approximately 1 GB. Physical touchscreens, mixed-DPI monitors, and presentation hardware need recorded acceptance. Live PMIS/Power BI imports, advertised-model quality, reference-machine scale targets and five researchers completing both software and curriculum workflows remain separate production gates.
 
 Remote collaboration, audio/video transcription, quantitative dataset analysis, cloud synchronization, automatic updates, and external publishing are outside the current release. See the [roadmap](docs/ROADMAP.md) for priorities rather than promises.
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PASSAGES_PER_PAGE,
+  clearWorkspaceDraftFallbacks,
   clampPassagePage,
   passagePage,
   parseBoardViewport,
@@ -116,6 +117,11 @@ describe("unfinished evidence forms", () => {
     expect(
       readEvidenceDraft("project", "other-source", "original-version"),
     ).toBeUndefined();
+    clearWorkspaceDraftFallbacks("project");
+    expect(
+      readEvidenceDraft("project", "source", "original-version"),
+    ).toBeUndefined();
+    saveEvidenceDraft("project", "source", "original-version", draft);
     saveEvidenceDraft("project", "source", "original-version");
     expect(
       readEvidenceDraft("project", "source", "original-version"),

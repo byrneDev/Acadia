@@ -11,7 +11,7 @@ import {
   type ResearchDecision,
   type ResearchGap,
 } from "../src/shared/pedigree";
-import type { ResearchState } from "../src/shared/research";
+import type { ResearchState, ResearchDraftInput } from "../src/shared/research";
 import {
   ResearchFlowWorkspace,
   type ResearchFlowRequest,
@@ -40,6 +40,13 @@ async function mount(state: PedigreeState, request: ResearchFlowRequest) {
     state.decisions[0]?.projectId ||
     crypto.randomUUID();
   const api = {
+    researchDrafts: vi.fn(async () => []),
+    saveResearchDraft: vi.fn(async (input: ResearchDraftInput) => ({
+      ...input,
+      revision: input.expectedRevision + 1,
+      updatedAt: new Date().toISOString(),
+    })),
+    deleteResearchDraft: vi.fn(async () => {}),
     pedigreeState: vi.fn(async () => state),
     onResearchChanged: vi.fn(() => () => {}),
     getPassage: vi.fn(),

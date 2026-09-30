@@ -18,6 +18,7 @@ import {
   reportToMarkdown,
 } from "../../shared/report";
 import "./ReportEditor.css";
+import { PassageCitationPicker } from "./PassageCitationPicker";
 
 export const CitationNode = TiptapNode.create({
   name: "citation",
@@ -86,6 +87,10 @@ export default function ReportEditor({
   const [error, setError] = useState("");
   const [proposal, setProposal] = useState<SectionProposal | null>(null);
   const [citationId, setCitationId] = useState("");
+  const [citationPicker, setCitationPicker] = useState(false);
+  const citationInsertion = useRef<
+    { from: number; to: number; snapshot: string } | undefined
+  >(undefined);
   const requestedSelection = useRef<Selection | null>(null);
   const mounted = useRef(true);
   const revisionsCitations = useRef<Citation[] | null>(null);
@@ -418,6 +423,19 @@ export default function ReportEditor({
           >
             <button
               type="button"
+              onClick={() => {
+                citationInsertion.current = {
+                  from: editor.state.selection.from,
+                  to: editor.state.selection.to,
+                  snapshot: JSON.stringify(editor.getJSON()),
+                };
+                setCitationPicker(true);
+              }}
+            >
+              Cite source passage
+            </button>
+            <button
+              type="button"
               aria-label="Heading 1"
               aria-pressed={editor.isActive("heading", { level: 1 })}
               onClick={() =>
@@ -556,6 +574,53 @@ export default function ReportEditor({
               </span>
             )}
           </div>
+          {citationPicker && (
+            <PassageCitationPicker
+              onClose={() => setCitationPicker(false)}
+              onSelect={(citation) => {
+                const insertion = citationInsertion.current;
+                if (
+                  !insertion ||
+                  insertion.snapshot !== JSON.stringify(editor.getJSON())
+                ) {
+                  setError(
+                    "The report changed while choosing a citation. Place the cursor again and reopen the citation picker.",
+                  );
+                  setCitationPicker(false);
+                  return;
+                }
+                const merged = mergeCitations(
+                  reportCitations(current.current.output),
+                  [citation],
+                );
+                revisionsCitations.current = merged;
+                const inserted = editor
+                  .chain()
+                  .focus()
+                  .insertContentAt(insertion.to, {
+                    type: "citation",
+                    attrs: {
+                      citationId: citation.id,
+                      label: String(
+                        merged.findIndex((entry) => entry.id === citation.id) +
+                          1,
+                      ),
+                    },
+                  })
+                  .run();
+                if (!inserted) {
+                  revisionsCitations.current = null;
+                  setError(
+                    "The citation could not be inserted here. Place the cursor in a paragraph and retry.",
+                  );
+                } else
+                  setStatus(
+                    "Exact historical passage citation added. Review whether it supports your writing.",
+                  );
+                setCitationPicker(false);
+              }}
+            />
+          )}
           <details className="report-section-tools">
             <summary>AI revision of selected text</summary>
             <p>

@@ -11,6 +11,9 @@ import type {
   SearchHit,
 } from "../../shared/research";
 import { Modal } from "./Dialogs";
+import { useDurableDraft } from "./durableDrafts";
+import { DraftStatus } from "./DraftStatus";
+import { AnalysisHistory } from "./AnalysisHistory";
 import { ReviewerNotes } from "./ReviewerNotes";
 import { AddToBoardButton } from "./BoardMappingContext";
 import "./ResearchWorkspace.css";
@@ -195,8 +198,38 @@ export default function ResearchWorkspace(props: Props) {
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searched, setSearched] = useState(false);
   const [url, setUrl] = useState(textDraft?.url || "");
-  const [claim, setClaim] = useState<ResearchClaim>();
-  const [task, setTask] = useState<ResearchTask>();
+  const [claimRecord, setClaimRecord] = useState<ResearchClaim>();
+  const [taskRecord, setTaskRecord] = useState<ResearchTask>();
+  const savedClaim = research.claims.find(
+    (entry) => entry.id === claimRecord?.id,
+  );
+  const savedTask = research.tasks.find((entry) => entry.id === taskRecord?.id);
+  const claimDraft = useDurableDraft<ResearchClaim | null>({
+    projectId: project.id,
+    key: `claim:${savedClaim?.id || "new"}`,
+    kind: "claim",
+    targetId: savedClaim?.id,
+    initial: savedClaim || claimRecord || null,
+    baseSignature: savedClaim?.updatedAt || "new",
+  });
+  const taskDraft = useDurableDraft<ResearchTask | null>({
+    projectId: project.id,
+    key: `task:${savedTask?.id || "new"}`,
+    kind: "task",
+    targetId: savedTask?.id,
+    initial: savedTask || taskRecord || null,
+    baseSignature: savedTask?.updatedAt || "new",
+  });
+  const claim = claimRecord ? claimDraft.value || claimRecord : undefined;
+  const task = taskRecord ? taskDraft.value || taskRecord : undefined;
+  const setClaim = (next?: ResearchClaim) => {
+    if (!next || !claimRecord || next.id !== claim?.id) setClaimRecord(next);
+    else claimDraft.edit(next);
+  };
+  const setTask = (next?: ResearchTask) => {
+    if (!next || !taskRecord || next.id !== task?.id) setTaskRecord(next);
+    else taskDraft.edit(next);
+  };
   const [question, setQuestion] = useState(
     textDraft?.question ?? project.question,
   );
@@ -734,37 +767,7 @@ export default function ResearchWorkspace(props: Props) {
           {suggestId && !suggestions && (
             <p>{research.jobs.find((j) => j.id === suggestId)?.message}</p>
           )}
-          <details className="audit-history">
-            <summary>Analysis history ({research.runs.length})</summary>
-            {research.runs
-              .slice()
-              .reverse()
-              .map((r) => (
-                <details key={r.id}>
-                  <summary>
-                    {new Date(r.createdAt).toLocaleString()} · {r.kind} ·{" "}
-                    {r.provider}/{r.model}
-                  </summary>
-                  <p>{r.question}</p>
-                  <p>
-                    {r.citations.length} citations · {r.sourceVersions.length}{" "}
-                    source versions · {r.exclusions.length} exclusions
-                  </p>
-                  <pre>
-                    {JSON.stringify(
-                      {
-                        instructions: r.instructions,
-                        queries: r.queries,
-                        groundingWarnings: r.groundingWarnings,
-                        sourceVersions: r.sourceVersions,
-                      },
-                      null,
-                      2,
-                    )}
-                  </pre>
-                </details>
-              ))}
-          </details>
+          <AnalysisHistory projectId={project.id} />
         </>
       )}
       {view === "discovery" && (
@@ -997,11 +1000,17 @@ export default function ResearchWorkspace(props: Props) {
             onSubmit={(e) => {
               e.preventDefault();
               action(async () => {
-                await api().saveClaim({ ...claim, updatedAt: now() });
+                await claimDraft.persist(async (value) => {
+                  if (!value) throw new Error("No claim to save.");
+                  const next = { ...value, updatedAt: now() };
+                  await api().saveClaim(next);
+                  return next;
+                });
                 setClaim(undefined);
               });
             }}
           >
+            <DraftStatus draft={claimDraft} />
             <label className="field">
               Claim
               <input
@@ -1142,6 +1151,7 @@ export default function ResearchWorkspace(props: Props) {
                   onClick={() =>
                     action(async () => {
                       await api().deleteClaim(claim.id);
+                      await claimDraft.discard();
                       setClaim(undefined);
                     })
                   }
@@ -1162,11 +1172,17 @@ export default function ResearchWorkspace(props: Props) {
             onSubmit={(e) => {
               e.preventDefault();
               action(async () => {
-                await api().saveTask({ ...task, updatedAt: now() });
+                await taskDraft.persist(async (value) => {
+                  if (!value) throw new Error("No task to save.");
+                  const next = { ...value, updatedAt: now() };
+                  await api().saveTask(next);
+                  return next;
+                });
                 setTask(undefined);
               });
             }}
           >
+            <DraftStatus draft={taskDraft} />
             <label className="field">
               Task
               <input
@@ -1261,6 +1277,7 @@ export default function ResearchWorkspace(props: Props) {
                 onClick={() =>
                   action(async () => {
                     await api().deleteTask(task.id);
+                    await taskDraft.discard();
                     setTask(undefined);
                   })
                 }

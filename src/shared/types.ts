@@ -14,8 +14,9 @@ import type {
   DesktopState,
   LocalModel,
 } from "./desktop";
-import type { DeliveryPlan } from "./pmis";
+import type { DeliveryPlan, DeliveryRecordRef } from "./pmis";
 import type { BoardReference } from "./board";
+import type { MaintenanceAPI } from "./maintenance";
 export type CardKind =
   | "note"
   | "question"
@@ -49,6 +50,8 @@ export interface ProjectPlanContext {
   analysisOutputId: string;
   analysisRevisionId?: string;
   gapClaimId?: string;
+  gapRefs?: DeliveryRecordRef[];
+  findingRefs?: DeliveryRecordRef[];
   gap: string;
   deliverableType: "software" | "curriculum" | "other";
   deliverable: string;
@@ -102,7 +105,7 @@ export interface ResearchOutput {
   deliveryPlan?: DeliveryPlan;
 }
 export interface Project {
-  schemaVersion: 1 | 2 | 3 | 4;
+  schemaVersion: 1 | 2 | 3 | 4 | 5;
   id: string;
   title: string;
   question: string;
@@ -140,7 +143,7 @@ export interface WorkspaceState {
   settings: AISettings;
   projectPath?: string;
 }
-export interface AcadiaAPI extends ResearchAPI {
+export interface AcadiaAPI extends ResearchAPI, MaintenanceAPI {
   getDesktopState?(): Promise<DesktopState>;
   saveDesktopPreferences?(
     patch: Partial<DesktopPreferences>,

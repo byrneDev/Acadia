@@ -11,6 +11,8 @@ import {
   exportPmisFiles,
   newWorkPackage,
   validateDeliveryPlan,
+  validateDeliveryPlanReferences,
+  pmisMappingPreview,
 } from "../src/shared/pmis";
 import { validateProject, createBlankProject } from "../src/shared/project";
 import { snapshotRevision, releasedReport } from "../src/shared/report";
@@ -21,6 +23,12 @@ import {
 } from "../src/main/report-export";
 import { PLANNER_IMPORTER } from "../src/main/planner-importer";
 import type { ProjectPlanContext, ResearchOutput } from "../src/shared/types";
+
+import {
+  createGap,
+  createFinding,
+  emptyPedigreeState,
+} from "../src/shared/pedigree";
 
 const context: ProjectPlanContext = {
   analysisOutputId: "analysis-1",
@@ -43,6 +51,110 @@ const output = (): ResearchOutput => ({
 });
 
 describe("deliverable plans and PMIS handoff", () => {
+  it("retains exact historical gap/finding and verification references without resolving the gap", () => {
+    const plan = draftDeliveryPlan(output()),
+      pedigree = emptyPedigreeState();
+    const gap = {
+      ...createGap("project"),
+      id: "gap",
+      revision: 2,
+      status: "open" as const,
+    };
+    const finding = {
+      ...createFinding("project", "claim"),
+      id: "finding",
+      revision: 1,
+    };
+    pedigree.gaps = [gap];
+    pedigree.findings = [finding];
+    plan.gapRefs = [{ id: "gap", revision: 1 }];
+    plan.findingRefs = [{ id: "finding", revision: 1 }];
+    plan.tasks[0].learningObjective =
+      "Diagnose the fault under stated conditions";
+    plan.tasks[0].acceptanceTest = "Identify the fault in three unseen cases";
+    plan.tasks[0].verificationEvidence = [
+      { sourceId: "source", versionId: "version", passageId: "passage" },
+    ];
+    plan.tasks[0].status = "complete";
+    const context = {
+      projectId: "project",
+      pedigree,
+      revisions: [
+        {
+          projectId: "project",
+          entityId: "gap",
+          kind: "gap" as const,
+          revision: 1,
+          id: "gap-revision-1",
+          createdAt: gap.createdAt,
+          data: { ...gap, revision: 1 },
+        },
+      ],
+      passages: [
+        {
+          id: "passage",
+          sourceId: "source",
+          versionId: "version",
+          text: "Results",
+          locator: "Page 3",
+          method: "native" as const,
+          inclusion: "include" as const,
+        },
+      ],
+    };
+    const normalized = validateDeliveryPlan(JSON.parse(JSON.stringify(plan)));
+    expect(normalized).toEqual(plan);
+    expect(() =>
+      validateDeliveryPlanReferences(normalized, context),
+    ).not.toThrow();
+    expect(gap.status).toBe("open");
+    expect(() =>
+      validateDeliveryPlanReferences(normalized, {
+        ...context,
+        projectId: "other",
+      }),
+    ).toThrow(/investigation/);
+    expect(() =>
+      validateDeliveryPlanReferences(normalized, {
+        ...context,
+        passages: [{ ...context.passages[0], versionId: "other-version" }],
+      }),
+    ).toThrow(/exact saved passage/);
+    expect(() =>
+      validateDeliveryPlan({ ...plan, gapRefs: [{ id: "gap", revision: 0 }] }),
+    ).toThrow();
+    const report = output();
+    report.plan = { ...report.plan!, gapRefs: plan.gapRefs };
+    report.deliveryPlan = plan;
+    const frozen = snapshotRevision(report);
+    plan.gapRefs[0].revision = 2;
+    expect(frozen.deliveryPlan?.gapRefs?.[0].revision).toBe(1);
+    const snapshot = snapshotPlanContext(report.plan, report);
+    report.plan.gapRefs![0].revision = 3;
+    expect(snapshot.gapRefs?.[0].revision).toBe(2);
+  });
+  it("exports mapping limits and stable import receipt identities with curriculum traceability", () => {
+    const plan = draftDeliveryPlan(output());
+    plan.gapRefs = [{ id: "gap", revision: 3 }];
+    plan.tasks[0].learningObjective = "Identify safety hazards";
+    plan.tasks[0].acceptanceTest = "Pass observed practical";
+    plan.tasks[0].verificationEvidence = [
+      { sourceId: "source", versionId: "v1", passageId: "p1" },
+    ];
+    const files = exportPmisFiles(plan),
+      preview = pmisMappingPreview(plan);
+    expect(preview.workPackageCount).toBe(6);
+    expect(preview.withoutVerificationEvidence).toBe(5);
+    expect(JSON.parse(files["import-mapping.json"])).toEqual(preview);
+    expect(files["IMPORT-RECEIPT-TEMPLATE.csv"]).toContain(plan.tasks[0].id);
+    expect(files["jira.csv"]).toContain("Acadia Work Package ID");
+    expect(files["monday.csv"]).toContain("Identify safety hazards");
+    expect(files["planner.json"]).toContain("gap (revision 3)");
+    expect(files["work-packages.csv"]).toContain("Pass observed practical");
+    expect(files["IMPORT-README.md"]).toContain("do not synchronize");
+    expect(files["IMPORT-README.md"]).toContain("have not been validated");
+  });
+
   it("produces task-based curriculum and software plans with explicit validation and unknown resources", () => {
     const curriculum = offlineProjectPlan(context);
     expect(curriculum).toContain("Objective-to-assessment");

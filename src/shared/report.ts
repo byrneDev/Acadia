@@ -254,7 +254,15 @@ export function citationDescription(citation: Citation): string {
   const when = citation.acquiredAt
     ? ` Acquired ${citation.acquiredAt.slice(0, 10)}.`
     : "";
-  return `${citation.sourceTitle} — ${citation.locator}.${citation.legacyCardId ? " Legacy card-level reference; passage not verified." : ` Source version ${citation.versionId}. ${citation.verified ? "Quotation location verified." : "Quotation location unverified."}`}${when}${citation.url ? ` ${citation.url}` : ""}`;
+  const publication = [
+    citation.author,
+    citation.publishedAt && `(${citation.publishedAt})`,
+    citation.sourceTitle,
+    citation.publisher,
+  ]
+    .filter(Boolean)
+    .join(". ");
+  return `${publication} — ${citation.locator}.${citation.legacyCardId ? " Legacy card-level reference; passage not verified." : ` Source version ${citation.versionId}. ${citation.verified ? "Quotation location verified." : "Quotation location unverified."}`}${when}${citation.doi ? ` DOI: ${citation.doi}.` : ""}${citation.url ? ` ${citation.url}` : ""}`;
 }
 
 export function snapshotRevision(

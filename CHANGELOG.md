@@ -1,6 +1,20 @@
 # Changelog
 
-Acadia follows a 0.x early-access release series. Entries describe application changes; platform validation is recorded separately in each release. Earlier versions were distributed as local development packages before the public repository.
+Acadia is preparing v1 through release candidates; v0.5.0 remains the published release. Entries describe application changes; platform validation is recorded separately in each release. Earlier versions were distributed as local development packages before the public repository.
+
+## 1.0.0-rc.1 — candidate source, not a production release
+
+- Added private durable drafts for research editors, reviewed item notes and delivery work, with save status, conflict handling and explicit discard. Drafts are separate from committed/released records.
+- Added manual passage citation insertion, historical PDF page comparison, paginated source/passage/history search, keyboard board movement and guided fictional software/curriculum investigations.
+- Strengthened evidence retrieval so pinned material has its own candidate lane, with independent-origin/contradiction/abstention fixture evaluation reported separately from button/API tests.
+- Added exact saved gap/finding revisions to delivery plans and work packages, requirements or learning objectives, acceptance tests, and verification passage references. Completed work does not automatically resolve a gap.
+- Expanded PMIS exports with a mapping preview, stable-ID receipt template, traceability fields and explicit repeated-import limitations. Added gaps, decisions, accepted-review provenance, derived-source classification and delivery verification relationships to Power BI exports.
+- Added author, publisher, publication date and DOI to available citation metadata and bibliography exports, plus a long-report fixture for multi-page tables and historical locators.
+- Added checked whole-library backup/restore, preserved recovery copies, redacted diagnostics, credential status/removal, synthetic generation checks and an explicit manual update check.
+- Introduced archive format v5 and schema migration with recoverable backups. Formats v1–v4 remain importable; older releases cannot open v5.
+- Added release gates for signed Windows/macOS production artifacts, macOS notarization, exact-commit external acceptance, advertised-model quality, scale targets and five human workflow testers. RC publication must be prerelease/non-latest. These definitions do not claim the external gates have passed.
+
+See [v1 validation](docs/VALIDATION-v1.0.md) for measured results and remaining production requirements. No live tenant acceptance, physical-device sign-off, distribution signing or production v1 publication is inferred from this source milestone.
 
 ## 0.5.0
 

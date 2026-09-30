@@ -1,4 +1,9 @@
 import type { Passage } from "../../shared/research";
+import {
+  readDraftBuffer,
+  writeDraftBuffer,
+  clearDraftBuffer,
+} from "./durableDrafts";
 
 export interface BoardViewport {
   x: number;
@@ -70,8 +75,8 @@ export interface EvidenceDraft {
   relation: "supports" | "contradicts" | "context";
   rationale: string;
 }
-// This is transient editing state, not an additional evidence store or an archive.
-// Retain unfinished forms when a reader is closed or the user visits another view.
+// In-memory fallbacks accompany the private durable editing buffers.
+// They never create evidence or an accepted review.
 const evidenceDrafts = new Map<string, EvidenceDraft>();
 const evidenceDraftKey = (
   projectId: string,
@@ -83,7 +88,12 @@ export function readEvidenceDraft(
   sourceId: string,
   versionId: string,
 ) {
-  return evidenceDrafts.get(evidenceDraftKey(projectId, sourceId, versionId));
+  return (
+    readDraftBuffer<EvidenceDraft>(
+      projectId,
+      `evidence:${sourceId}:${versionId}`,
+    ) || evidenceDrafts.get(evidenceDraftKey(projectId, sourceId, versionId))
+  );
 }
 export function saveEvidenceDraft(
   projectId: string,
@@ -94,6 +104,20 @@ export function saveEvidenceDraft(
   const key = evidenceDraftKey(projectId, sourceId, versionId);
   if (draft) evidenceDrafts.set(key, draft);
   else evidenceDrafts.delete(key);
+  if (typeof window !== "undefined" && window.acadia?.saveResearchDraft) {
+    if (draft)
+      writeDraftBuffer(
+        projectId,
+        `evidence:${sourceId}:${versionId}`,
+        "source-evidence",
+        draft,
+      );
+    else
+      void clearDraftBuffer(
+        projectId,
+        `evidence:${sourceId}:${versionId}`,
+      ).catch(() => {});
+  }
 }
 
 export interface ResearchTextDraft {
@@ -104,7 +128,10 @@ export interface ResearchTextDraft {
 }
 const researchTextDrafts = new Map<string, ResearchTextDraft>();
 export function readResearchTextDraft(projectId: string) {
-  return researchTextDrafts.get(projectId);
+  return (
+    readDraftBuffer<ResearchTextDraft>(projectId, "research-text") ||
+    researchTextDrafts.get(projectId)
+  );
 }
 export function saveResearchTextDraft(
   projectId: string,
@@ -117,4 +144,19 @@ export function saveResearchTextDraft(
     question: draft.question,
     queries: draft.queries,
   });
+  if (typeof window !== "undefined" && window.acadia?.saveResearchDraft)
+    writeDraftBuffer(
+      projectId,
+      "research-text",
+      "inquiry-text",
+      researchTextDrafts.get(projectId)!,
+    );
+}
+
+/** Drop only fallback buffers after a successful same-ID archive replacement. */
+export function clearWorkspaceDraftFallbacks(projectId: string) {
+  researchTextDrafts.delete(projectId);
+  for (const key of evidenceDrafts.keys())
+    if ((JSON.parse(key) as string[])[0] === projectId)
+      evidenceDrafts.delete(key);
 }

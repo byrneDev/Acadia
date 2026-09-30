@@ -4,6 +4,8 @@ import type {
   ProjectPlanContext,
   ResearchOutput,
 } from "../../shared/types";
+import type { PedigreeState } from "../../shared/pedigree";
+import { DeliveryRecordFields } from "./DeliveryTraceability";
 import type { ResearchState } from "../../shared/research";
 
 export function createPlanContext(output: ResearchOutput): ProjectPlanContext {
@@ -18,12 +20,14 @@ export function createPlanContext(output: ResearchOutput): ProjectPlanContext {
 export function DeliverablePlanFields({
   project,
   research,
+  pedigree,
   selectedOutput,
   value,
   onChange,
 }: {
   project: Project;
   research?: ResearchState | null;
+  pedigree?: PedigreeState | null;
   selectedOutput?: ResearchOutput;
   value?: ProjectPlanContext;
   onChange: (value: ProjectPlanContext) => void;
@@ -132,6 +136,12 @@ export function DeliverablePlanFields({
           ))}
         </select>
       </label>
+      <DeliveryRecordFields
+        pedigree={pedigree}
+        research={research}
+        value={value}
+        onChange={update}
+      />
       <label className="field">
         Gap to bridge
         <textarea

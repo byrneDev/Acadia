@@ -1,0 +1,94 @@
+{
+  "benchmarkVersion": 1,
+  "recordedAt": "2026-09-30T14:04:02.046Z",
+  "machine": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "cpu": "Apple M2",
+    "totalMemoryBytes": 25769803776
+  },
+  "fixture": {
+    "synthetic": true,
+    "projectId": "e5c2bb41-24ee-42de-acc7-f3e712b743e7",
+    "sources": 1000,
+    "passages": 100000,
+    "cards": 500
+  },
+  "scope": "Synthetic isolated profile. Actual host measurements only; not 16 GB/SSD reference-machine or physical touch/display acceptance.",
+  "launchToUsableBoardMilliseconds": 2824.830791,
+  "search": {
+    "exactSearchMilliseconds": [
+      3.299999952316284,
+      0.3999999761581421,
+      0.30000007152557373,
+      0.19999992847442627,
+      0.30000007152557373,
+      0.2999999523162842,
+      0.30000007152557373,
+      0.2999999523162842,
+      0.20000004768371582,
+      0.2999999523162842
+    ],
+    "commonSearchFinalPageMilliseconds": 694,
+    "total": 100000,
+    "beforeX": 0
+  },
+  "keyboardMoveToCommittedMilliseconds": 515.4174170000006,
+  "rendererFramesDuringInteraction": {
+    "count": 82,
+    "maxGapMilliseconds": 66.69999999999982,
+    "p95GapMilliseconds": 18.699999999999818
+  },
+  "processes": [
+    {
+      "type": "Browser",
+      "memory": {
+        "workingSetSize": 656304,
+        "peakWorkingSetSize": 710416
+      },
+      "cpu": {
+        "cumulativeCPUUsage": 3.129704,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      }
+    },
+    {
+      "type": "GPU",
+      "memory": {
+        "workingSetSize": 100848,
+        "peakWorkingSetSize": 125408
+      },
+      "cpu": {
+        "cumulativeCPUUsage": 0.520925,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      }
+    },
+    {
+      "type": "Utility",
+      "memory": {
+        "workingSetSize": 41520,
+        "peakWorkingSetSize": 47712
+      },
+      "cpu": {
+        "cumulativeCPUUsage": 0.080083,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      }
+    },
+    {
+      "type": "Tab",
+      "memory": {
+        "workingSetSize": 414640,
+        "peakWorkingSetSize": 439840
+      },
+      "cpu": {
+        "cumulativeCPUUsage": 2.603787,
+        "percentCPUUsage": 0,
+        "idleWakeupsPerSecond": 0
+      }
+    }
+  ],
+  "outcome": "Functional checks passed. Compare raw measurements with the declared hardware budget; one sample is not a performance guarantee."
+}

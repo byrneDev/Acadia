@@ -118,7 +118,7 @@ export function buildPowerBiFiles(
     "sources",
     "One source record. Unknown independence is not independent corroboration.",
     ["id"],
-    "id projectId title kind currentVersionId inclusion duplicateOf? independenceStatus createdAt:datetimezone updatedAt:datetimezone",
+    "id projectId title kind currentVersionId inclusion derived:boolean includedEvidence:boolean evidenceRole duplicateOf? independenceStatus createdAt:datetimezone updatedAt:datetimezone",
     research.sources.map((s) => ({
       id: s.id,
       projectId: s.projectId,
@@ -126,6 +126,9 @@ export function buildPowerBiFiles(
       kind: s.kind,
       currentVersionId: s.currentVersionId,
       inclusion: s.inclusion,
+      derived: Boolean(s.derived),
+      includedEvidence: !s.derived && s.inclusion !== "exclude",
+      evidenceRole: s.derived ? "historical-analytical-copy" : "source",
       duplicateOf: s.duplicateOf,
       independenceStatus: s.duplicateOf
         ? "duplicate-file"
@@ -188,6 +191,60 @@ export function buildPowerBiFiles(
       limitations: c.limitations,
       updatedAt: c.updatedAt,
     })),
+  );
+  table(
+    "research_gaps",
+    "Current manually reviewed gap state. Completed delivery work never resolves a gap automatically.",
+    ["id"],
+    `${revisionFields} title missingInformation importance resolutionCriteria status`,
+    pedigree.gaps.map((g) => ({
+      ...meta(g),
+      title: g.title,
+      missingInformation: g.missingInformation,
+      importance: g.importance,
+      resolutionCriteria: g.resolutionCriteria,
+      status: g.status,
+    })),
+  );
+  table(
+    "decisions",
+    "Current researcher decision, separate from proposed delivery work.",
+    ["id"],
+    `${revisionFields} title action rationale alternatives status`,
+    pedigree.decisions.map((d) => ({
+      ...meta(d),
+      title: d.title,
+      action: d.action,
+      rationale: d.rationale,
+      alternatives: d.alternatives,
+      status: d.status,
+    })),
+  );
+  table(
+    "accepted_reviews",
+    "One human-accepted item review per canonical claim. Private notes and quotations omitted; acceptance does not imply evidential support.",
+    ["id"],
+    "id claimId runId insightId acceptedAt:datetimezone targetKind targetId targetVersionId? sourceId? versionId? noteLength:integer citationCount:integer",
+    research.claims.flatMap((c) =>
+      c.itemReview
+        ? [
+            {
+              id: c.id,
+              claimId: c.id,
+              runId: c.itemReview.runId,
+              insightId: c.itemReview.insightId,
+              acceptedAt: c.itemReview.acceptedAt,
+              targetKind: c.itemReview.target.kind,
+              targetId: c.itemReview.target.id,
+              targetVersionId: c.itemReview.target.versionId,
+              sourceId: c.itemReview.sourceId,
+              versionId: c.itemReview.versionId,
+              noteLength: c.itemReview.notes.length,
+              citationCount: c.itemReview.citations.length,
+            },
+          ]
+        : [],
+    ),
   );
   const linkRows = research.claims.flatMap((c) =>
     c.links.map((link) => {
@@ -464,6 +521,36 @@ export function buildPowerBiFiles(
     relation(name, left, leftTable);
     relation(name, right, rightTable, "id", false);
   };
+  for (const [field, target, key] of [
+    ["claimIds", "claims", "claimId"],
+    ["taskIds", "research_tasks", "taskId"],
+    ["passageIds", "passages", "passageId"],
+  ] as const)
+    bridge(
+      `gap_${target}`,
+      "gapId",
+      key,
+      pedigree.gaps.flatMap((g) =>
+        g[field].map((id) => ({ gapId: g.id, [key]: id })),
+      ),
+      "research_gaps",
+      target,
+    );
+  for (const [field, target, key] of [
+    ["claimIds", "claims", "claimId"],
+    ["assumptionIds", "assumptions", "assumptionId"],
+    ["outputIds", "reports", "reportId"],
+  ] as const)
+    bridge(
+      `decision_${target}`,
+      "decisionId",
+      key,
+      pedigree.decisions.flatMap((d) =>
+        d[field].map((id) => ({ decisionId: d.id, [key]: id })),
+      ),
+      "decisions",
+      target,
+    );
   bridge(
     "appraisal_passages",
     "appraisalId",
@@ -657,6 +744,21 @@ export function buildPowerBiFiles(
   const citationFields =
     "id citationId sourceId? versionId? passageId? locator acquiredAt:datetimezone recordedVerified:boolean quotationLocationStatus legacyCardId?";
   table(
+    "accepted_review_citations",
+    "One frozen reference attached to human-accepted notes. Location validity remains separate from evidential support.",
+    ["id"],
+    `${citationFields} reviewId`,
+    research.claims.flatMap((c) =>
+      (c.itemReview?.citations || []).map((ref) => ({
+        ...citationRow(ref, c.id),
+        reviewId: c.id,
+      })),
+    ),
+  );
+  relation("accepted_reviews", "claimId", "claims");
+  relation("accepted_reviews", "runId", "analyses", "id", false);
+  relation("accepted_review_citations", "reviewId", "accepted_reviews");
+  table(
     "analysis_citations",
     "One citation per run; location checked against saved passage locally, independent of support and confidence. Quote text omitted.",
     ["id"],
@@ -689,13 +791,39 @@ export function buildPowerBiFiles(
 
   const planRows: Record<string, Cell>[] = [],
     workRows: Record<string, Cell>[] = [],
-    dependencies: Record<string, Cell>[] = [];
+    dependencies: Record<string, Cell>[] = [],
+    verification: Record<string, Cell>[] = [],
+    deliveryRefs: Record<string, Cell>[] = [];
+  const addRefs = (
+    ownerId: string,
+    ownerKind: "plan" | "work-package",
+    value: Pick<DeliveryPlan, "gapRefs" | "findingRefs">,
+  ) => {
+    for (const [kind, refs, current] of [
+      ["gap", value.gapRefs, pedigree.gaps],
+      ["finding", value.findingRefs, pedigree.findings],
+    ] as const)
+      for (const ref of refs || [])
+        deliveryRefs.push({
+          id: composite(ownerId, kind, ref.id),
+          ownerKind,
+          deliveryPlanId: ownerKind === "plan" ? ownerId : undefined,
+          workPackageId: ownerKind === "work-package" ? ownerId : undefined,
+          recordKind: kind,
+          gapId: kind === "gap" ? ref.id : undefined,
+          findingId: kind === "finding" ? ref.id : undefined,
+          recordRevision: ref.revision,
+          currentRevisionMatches:
+            current.find((r) => r.id === ref.id)?.revision === ref.revision,
+        });
+  };
   const addPlan = (
     plan: DeliveryPlan,
     reportId: string,
     revisionId?: string,
   ) => {
     const key = composite(reportId, revisionId || "draft", plan.id);
+    addRefs(key, "plan", plan);
     planRows.push({
       id: key,
       planId: plan.id,
@@ -714,6 +842,13 @@ export function buildPowerBiFiles(
     });
     for (const task of plan.tasks) {
       const workKey = composite(key, task.id);
+      addRefs(workKey, "work-package", task);
+      for (const ref of task.verificationEvidence || [])
+        verification.push({
+          id: composite(workKey, ref.passageId),
+          workPackageId: workKey,
+          ...ref,
+        });
       workRows.push({
         id: workKey,
         workPackageId: task.id,
@@ -722,6 +857,9 @@ export function buildPowerBiFiles(
         phase: task.phase,
         description: task.description,
         acceptanceCriteria: task.acceptanceCriteria,
+        requirement: task.requirement,
+        learningObjective: task.learningObjective,
+        acceptanceTest: task.acceptanceTest,
         dependencyNotes: task.dependencyNotes,
         status: task.status,
         owner: task.owner,
@@ -751,9 +889,41 @@ export function buildPowerBiFiles(
     "delivery_work_packages",
     "One work package in one draft/revision plan. Original workPackageId repeats across revisions; id is the unique export key.",
     ["id"],
-    "id workPackageId deliveryPlanId title phase description acceptanceCriteria dependencyNotes status owner dueDate?:date",
+    "id workPackageId deliveryPlanId title phase description acceptanceCriteria requirement? learningObjective? acceptanceTest? dependencyNotes status owner dueDate?:date",
     workRows,
   );
+  table(
+    "delivery_record_references",
+    "One plan/work-package reference to an exact gap/finding revision. Relationships expose current record labels only; compare currentRevisionMatches before interpreting current assessment as the saved assessment.",
+    ["id"],
+    "id ownerKind deliveryPlanId? workPackageId? recordKind gapId? findingId? recordRevision:integer currentRevisionMatches:boolean",
+    deliveryRefs,
+  );
+  table(
+    "work_package_verification",
+    "One exact saved passage reference proposed as verification evidence. Presence is not proof of acceptance or gap resolution.",
+    ["id"],
+    "id workPackageId passageId sourceId versionId",
+    verification,
+  );
+  for (const [column, target] of [
+    ["deliveryPlanId", "delivery_plans"],
+    ["workPackageId", "delivery_work_packages"],
+    ["gapId", "research_gaps"],
+    ["findingId", "findings"],
+  ])
+    relation("delivery_record_references", column, target, "id", false);
+  relation(
+    "work_package_verification",
+    "workPackageId",
+    "delivery_work_packages",
+  );
+  for (const [column, target] of [
+    ["passageId", "passages"],
+    ["sourceId", "sources"],
+    ["versionId", "source_versions"],
+  ])
+    relation("work_package_verification", column, target, "id", false);
   bridge(
     "work_package_dependencies",
     "workPackageId",
@@ -818,7 +988,11 @@ export function buildPowerBiFiles(
     "id",
     false,
   );
-  for (const name of ["analysis_citations", "report_citations"])
+  for (const name of [
+    "analysis_citations",
+    "report_citations",
+    "accepted_review_citations",
+  ])
     for (const [column, target] of [
       ["sourceId", "sources"],
       ["versionId", "source_versions"],
@@ -863,6 +1037,7 @@ export function buildPowerBiFiles(
         "source URLs",
         "passage and quotation text",
         "report bodies",
+        "accepted review note bodies",
         "model prompts and responses",
         "model request payloads",
         "credentials",
@@ -883,6 +1058,10 @@ export function buildPowerBiFiles(
           "Blank nullable values load as null. Blank researcher text is unassessed, not zero or false.",
         spreadsheetSafety:
           "Formula-like text is prefixed with an apostrophe. The prefix is intentionally preserved by the loader.",
+        derivedSources:
+          "Keep historical analytical copies for citation joins; filter includedEvidence=true for source-library evidence counts. File counts are never independent-origin counts.",
+        gapResolution:
+          "Gap states change only by researcher review. Work-package completion and attached verification evidence do not resolve a gap.",
         revisionScope:
           "Filter draft/revision scope; repeating work packages and citations across revisions must not be summed as new evidence.",
       },

@@ -68,12 +68,16 @@ export function pedigreeChanged(
     "assumptions",
     "methods",
     "issues",
+    "gaps",
+    "decisions",
   ] as const) {
+    const previous = snapshot.state[key] ?? [],
+      current = live[key] ?? [];
     if (
-      snapshot.state[key].length !== live[key].length ||
-      snapshot.state[key].some(
+      previous.length !== current.length ||
+      previous.some(
         (saved) =>
-          !live[key].some(
+          !current.some(
             (now) => now.id === saved.id && now.revision === saved.revision,
           ),
       )
@@ -97,7 +101,12 @@ export function pedigreeChanged(
         !now ||
         now.status !== v.status ||
         now.processedUnits !== v.processedUnits ||
-        now.totalUnits !== v.totalUnits
+        now.totalUnits !== v.totalUnits ||
+        now.title !== v.title ||
+        now.author !== v.author ||
+        now.publisher !== v.publisher ||
+        now.publishedAt !== v.publishedAt ||
+        now.doi !== v.doi
       );
     })
   )
@@ -111,6 +120,17 @@ export function pedigreeChanged(
     snapshot.claims.length !== research.claims.length
   )
     changed.push("evidence links");
+  if (
+    JSON.stringify(
+      snapshot.claims.filter((c) => c.itemReview).map((c) => c.itemReview),
+    ) !==
+    JSON.stringify(
+      research.claims.filter((c) => c.itemReview).map((c) => c.itemReview),
+    )
+  )
+    changed.push("accepted reviewer notes");
+  if (JSON.stringify(snapshot.tasks) !== JSON.stringify(research.tasks))
+    changed.push("research tasks");
   return changed;
 }
 
@@ -182,6 +202,30 @@ export function analyticalChecks(
       `${origins.unknownIndependence} source(s) have unassessed independence; do not treat file counts as independent corroboration.`,
     );
   for (const claim of research.claims) {
+    if (claim.itemReview) {
+      const review = claim.itemReview,
+        original =
+          research.runs.find((run) => run.id === review.runId)?.itemInsight ??
+          research.itemReviewBases?.find(
+            (basis) => basis.runId === review.runId,
+          );
+      const oldVersion = review.citations.some(
+        (citation) =>
+          research.sources.find((source) => source.id === citation.sourceId)
+            ?.currentVersionId !== citation.versionId,
+      );
+      if (
+        oldVersion ||
+        (original &&
+          (original.question !== brief?.question ||
+            (original.briefRevision !== undefined &&
+              original.briefRevision !== (brief?.revision ?? 0))))
+      )
+        warn(
+          `stale-review-${claim.id}`,
+          `${claim.title}: accepted Reviewer Notes retain their historical basis; the source or research brief changed. Reconsider the interpretation before using it as current evidence.`,
+        );
+    }
     const finding = state.findings.find((f) => f.claimId === claim.id);
     if (
       !finding ||
@@ -214,6 +258,37 @@ export function analyticalChecks(
             `${claim.title}: an evidence passage is missing.`,
           );
   }
+  for (const gap of state.gaps ?? []) {
+    if (!gap.missingInformation.trim() || !gap.resolutionCriteria.trim())
+      warn(
+        `gap-criteria-${gap.id}`,
+        `${gap.title}: missing information or gap-resolution criteria remain unassessed.`,
+      );
+    if (
+      gap.status === "resolved" &&
+      !gap.passageIds.length &&
+      !gap.taskIds.some((id) =>
+        research.tasks.some(
+          (task) => task.id === id && task.status === "complete",
+        ),
+      )
+    )
+      warn(
+        `gap-resolution-${gap.id}`,
+        `${gap.title}: marked resolved without a linked observation or completed research task; review the resolution basis.`,
+      );
+  }
+  for (const decision of state.decisions ?? [])
+    if (
+      decision.status === "made" &&
+      (!decision.action.trim() ||
+        !decision.rationale.trim() ||
+        !decision.claimIds.length)
+    )
+      warn(
+        `decision-basis-${decision.id}`,
+        `${decision.title}: the recorded decision lacks an action, rationale or linked findings.`,
+      );
   for (const method of state.methods)
     if (method.reviewStatus !== "reviewed")
       warn(
@@ -301,6 +376,11 @@ export function pedigreeAppendix(
     ...snapshot.claims.flatMap((c) => c.links.map((l) => l.passageId)),
     ...state.appraisals.flatMap((a) => a.passageIds),
     ...state.assumptions.flatMap((a) => a.passageIds),
+    ...(state.gaps ?? []).flatMap((gap) => gap.passageIds),
+    ...snapshot.claims.flatMap(
+      (claim) =>
+        claim.itemReview?.citations.map((citation) => citation.passageId) ?? [],
+    ),
     ...state.methods.flatMap((m) => m.rows.flatMap((r) => r.passageIds)),
     ...state.methods.flatMap((m) =>
       m.kind === "hypotheses"
@@ -324,6 +404,10 @@ export function pedigreeAppendix(
         locator: p.locator,
         quote: p.text,
         acquiredAt: version?.acquiredAt || snapshot.createdAt,
+        ...(version?.author ? { author: version.author } : {}),
+        ...(version?.publisher ? { publisher: version.publisher } : {}),
+        ...(version?.publishedAt ? { publishedAt: version.publishedAt } : {}),
+        ...(version?.doi ? { doi: version.doi } : {}),
         verified: p.method !== "legacy",
         ...(version?.url ? { url: version.url } : {}),
       };
@@ -378,6 +462,49 @@ export function pedigreeAppendix(
     const finding = state.findings.find((f) => f.claimId === claim.id);
     markdown += `\n#### ${value(claim.title)}\n\nClassification: ${finding?.classification || "unassessed"}. Support review: ${finding?.supportReview || "unassessed"}. Researcher confidence: ${finding?.confidence || "unassessed"}; ${value(finding?.confidenceBasis || "")}.\n\nReasoning: ${value(finding?.reasoning || "")}\n\nSupporting passages: ${refs(claim.links.filter((l) => l.relation === "supports").map((l) => l.passageId))}. Conflicting passages: ${refs(claim.links.filter((l) => l.relation === "contradicts").map((l) => l.passageId))}.\n\nAlternatives: ${value(claim.alternatives)}. Limitations: ${value(claim.limitations)}.\n\nWhat would change this assessment: ${value(finding?.wouldChange || "")}\n`;
   }
+  const reviewed = snapshot.claims.filter((claim) => claim.itemReview);
+  if (reviewed.length) {
+    markdown +=
+      "\n### Accepted Reviewer Notes\n\nHuman-reviewed interpretations retain their original source versions. Acceptance is not proof of evidential support or independent corroboration.\n";
+    for (const claim of reviewed) {
+      const review = claim.itemReview!;
+      const notes = review.notes.replace(
+        /\[(?:S)?(\d+)\]/g,
+        (match, label: string) => {
+          const citation = review.citations.find(
+            (entry) => entry.label === label,
+          );
+          return citation ? refs([citation.passageId]) : match;
+        },
+      );
+      markdown += `\n#### ${value(claim.title)}\n\nAccepted ${value(review.acceptedAt)}; summary run ${value(review.runId)}; source version ${value(review.versionId || "No original source passage")}.\n\n${notes}\n`;
+    }
+  }
+  const claimTitles = (ids: string[]) =>
+    ids
+      .map(
+        (id) =>
+          snapshot.claims.find((claim) => claim.id === id)?.title ||
+          "Missing finding",
+      )
+      .join("; ");
+  markdown += `\n### Evidence gaps\n\n| Gap / revision | Missing information and resolution criteria | Status and linked work | References |\n| --- | --- | --- | --- |\n${
+    (state.gaps ?? [])
+      .map(
+        (gap) =>
+          `| ${value(gap.title)}; revision ${gap.revision} | ${value(gap.missingInformation)}; resolution: ${value(gap.resolutionCriteria)}; importance: ${value(gap.importance)} | ${gap.status}; findings: ${value(claimTitles(gap.claimIds))}; tasks: ${value(
+            gap.taskIds
+              .map((id) => {
+                const task = snapshot.tasks.find((entry) => entry.id === id);
+                return task ? `${task.title} (${task.status})` : "Missing task";
+              })
+              .join("; "),
+          )} | ${refs(gap.passageIds)} |`,
+      )
+      .join("\n") ||
+    "| No gaps recorded | Unassessed | Not proof that evidence is complete | No passage linked |"
+  }\n`;
+  markdown += `\n### Decisions\n\n| Decision / revision | Action and rationale | Alternatives and linked basis | Status |\n| --- | --- | --- | --- |\n${(state.decisions ?? []).map((decision) => `| ${value(decision.title)}; revision ${decision.revision} | ${value(decision.action)}; ${value(decision.rationale)} | ${value(decision.alternatives)}; findings: ${value(claimTitles(decision.claimIds))}; assumptions: ${value(decision.assumptionIds.map((id) => state.assumptions.find((a) => a.id === id)?.statement || "Missing assumption").join("; "))}; report IDs: ${value(decision.outputIds.join("; "))} | ${decision.status} |`).join("\n") || "| No decision recorded | Unassessed | No basis recorded | Proposed work only |"}\n`;
   markdown += `\n### Assumptions\n\n| Assumption | Consequence | Validation / review |\n| --- | --- | --- |\n${state.assumptions.map((a) => `| ${value(a.statement)} ${refs(a.passageIds)} | ${value(a.consequence)} | ${value(a.validation)}; ${a.status} |`).join("\n") || "| No assumptions recorded | Unassessed | Not evidence that no assumptions exist |"}\n`;
   for (const method of state.methods) {
     markdown += `\n### Method: ${value(method.title)}\n\n${value(method.objective)}. Revision ${method.revision}; ${method.reviewStatus}.\n\n| Observation / proposition | Assessment and reasoning | Next test | References |\n| --- | --- | --- | --- |\n`;

@@ -8,6 +8,32 @@ interface Store {
   refresh: () => void;
 }
 const stores = new Map<string, Store>();
+const health = new Map<string, { stale: boolean; lastSuccess?: number }>();
+const healthListeners = new Map<string, Set<() => void>>();
+const healthy: { stale: boolean; lastSuccess?: number } = { stale: false };
+export const researchHealth = (projectId: string) =>
+  health.get(projectId) || healthy;
+export function subscribeResearchHealth(
+  projectId: string,
+  listener: () => void,
+) {
+  if (!healthListeners.has(projectId))
+    healthListeners.set(projectId, new Set());
+  healthListeners.get(projectId)!.add(listener);
+  return () => {
+    healthListeners.get(projectId)?.delete(listener);
+  };
+}
+function publishHealth(projectId: string, stale: boolean) {
+  health.set(projectId, {
+    stale,
+    lastSuccess: stale ? health.get(projectId)?.lastSuccess : Date.now(),
+  });
+  healthListeners.get(projectId)?.forEach((listener) => listener());
+}
+export function retryResearchRefresh(projectId: string) {
+  stores.get(projectId)?.refresh();
+}
 
 // All views of the active project share one listener and one in-flight read.
 // Progress bursts are coalesced; an event received during a read triggers a
@@ -33,10 +59,11 @@ export function subscribeResearch(projectId: string, subscriber: Subscriber) {
         const state = await window.acadia!.researchState();
         if (alive) {
           next.state = state;
+          publishHealth(projectId, false);
           for (const listener of next.subscribers) listener(state);
         }
       } catch {
-        /* Existing UI state remains available during a transient refresh failure. */
+        if (alive) publishHealth(projectId, true);
       } finally {
         reading = false;
         if (alive && requested) next.refresh();

@@ -86,6 +86,7 @@ interface ReleaserProps {
   research?: ResearchState | null;
   onSource: (id: string) => void;
   onUpdateOutput: (output: ResearchOutput) => void;
+  onPersistOutput: (output: ResearchOutput) => Promise<void>;
   onRelease: (outputId: string, revisionId: string) => void;
   onCitation: (citation: Citation) => void;
 }
@@ -160,6 +161,7 @@ export default function Releaser({
   research: providedResearch,
   onSource,
   onUpdateOutput,
+  onPersistOutput,
   onRelease,
   onCitation,
 }: ReleaserProps) {
@@ -472,14 +474,16 @@ export default function Releaser({
     setKind("project-plan");
     setComposerOpen(true);
   }
-  function applyChallenge(
+  async function applyChallenge(
     change: NonNullable<ChallengeProposal["suggestedChanges"]>[number],
     proposal: ChallengeProposal,
   ) {
     if (readOnly || historical || !latestDraft.current) return;
     try {
       flushReport();
-      const run = research?.runs.find((r) => r.id === proposal.runId);
+      const targetId = latestDraft.current.id;
+      const run = await window.acadia!.getAnalysisRun(proposal.runId);
+      if (activeProject.current !== project.id || latestDraft.current?.id !== targetId) return;
       const basis = run
         ? (JSON.parse(run.instructions) as {
             originalDocument?: ReportDocument;
@@ -930,6 +934,7 @@ export default function Releaser({
             <DeliverablePlanFields
               project={project}
               research={research}
+              pedigree={livePedigree}
               selectedOutput={selectedOutput}
               value={plan}
               onChange={setPlan}
@@ -1342,19 +1347,28 @@ export default function Releaser({
                 <DeliveryPlanPanel
                   key={`${selectedOutput.id}-${revisionId}`}
                   output={selectedOutput}
+                  projectId={project.id}
+                  research={research}
+                  pedigree={livePedigree}
                   readOnly={readOnly || Boolean(historical)}
-                  onChange={(value) => {
+                  onChange={async (value) => {
                     const current = latestDraft.current;
                     if (
                       current &&
                       current.id === value.id &&
                       !readOnly &&
                       !historical
-                    )
-                      updateOutput({
+                    ) {
+                      const updated = {
                         ...current,
                         deliveryPlan: value.deliveryPlan,
-                      });
+                      };
+                      await onPersistOutput(updated);
+                      updateOutput(updated);
+                    } else
+                      throw new Error(
+                        "The selected report changed. Reopen its saved work-package draft before applying it.",
+                      );
                   }}
                   onError={handleError}
                 />

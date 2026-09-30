@@ -1,6 +1,6 @@
 {
   "name": "acadia",
-  "version": "0.5.0",
+  "version": "1.0.0-rc.1",
   "description": "Collect evidence. Connect ideas. Release understanding.",
   "author": {
     "name": "byrneDev",
@@ -161,7 +161,7 @@
         "to": "Library-hours-sample.acadia"
       },
       {
-        "from": "docs/VALIDATION-v0.5.md",
+        "from": "docs/VALIDATION-v1.0.md",
         "to": "VALIDATION.md"
       },
       {
@@ -211,6 +211,66 @@
       {
         "from": "docs/evaluations/v0.4-item-summary-local-model.json",
         "to": "evaluations/v0.4-item-summary-local-model.json"
+      },
+      {
+        "from": "docs/VALIDATION-v1.0.md",
+        "to": "VALIDATION-v1.0.md"
+      },
+      {
+        "from": "docs/PMIS-HANDOFF.md",
+        "to": "PMIS-HANDOFF.md"
+      },
+      {
+        "from": "docs/RECOVERY.md",
+        "to": "RECOVERY.md"
+      },
+      {
+        "from": "docs/ACCEPTANCE-v1.0.md",
+        "to": "ACCEPTANCE-v1.0.md"
+      },
+      {
+        "from": "docs/evaluations/v1-local-model-baseline.json",
+        "to": "evaluations/v1-local-model-baseline.json"
+      },
+      {
+        "from": "docs/evaluations/v1-local-model.json",
+        "to": "evaluations/v1-local-model.json"
+      },
+      {
+        "from": "docs/evaluations/v1-scale-backend.json",
+        "to": "evaluations/v1-scale-backend.json"
+      },
+      {
+        "from": "docs/evaluations/v1-scale-desktop.json",
+        "to": "evaluations/v1-scale-desktop.json"
+      },
+      {
+        "from": "docs/screenshots/v1.0/report-page-1.png",
+        "to": "screenshots/v1.0/report-page-1.png"
+      },
+      {
+        "from": "docs/screenshots/v1.0/report-page-6.png",
+        "to": "screenshots/v1.0/report-page-6.png"
+      },
+      {
+        "from": "docs/screenshots/v1.0/report-page-12.png",
+        "to": "screenshots/v1.0/report-page-12.png"
+      },
+      {
+        "from": "docs/evaluations/v1-mac-upgrade.json",
+        "to": "evaluations/v1-mac-upgrade.json"
+      },
+      {
+        "from": "docs/evaluations/v1-local-model-interface.json",
+        "to": "evaluations/v1-local-model-interface.json"
+      },
+      {
+        "from": "docs/evaluations/v1-local-model-challenge-retry.json",
+        "to": "evaluations/v1-local-model-challenge-retry.json"
+      },
+      {
+        "from": "docs/evaluations/v1-local-model-challenge-final.json",
+        "to": "evaluations/v1-local-model-challenge-final.json"
       }
     ],
     "asarUnpack": [

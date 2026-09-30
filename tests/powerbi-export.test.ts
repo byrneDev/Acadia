@@ -6,6 +6,8 @@ import {
   createAssumption,
   createBrief,
   createFinding,
+  createGap,
+  createDecision,
   createMethodRow,
   createMethodWorksheet,
   createOrigin,
@@ -346,10 +348,94 @@ function fixture() {
       ],
     },
   ];
+  research.sources[2].derived = true;
+  research.claims[0].itemReview = {
+    runId: "run1",
+    insightId: "insight1",
+    target: { kind: "source", id: "s1", versionId: "v1" },
+    acceptedAt: at,
+    notes: "PRIVATE_REVIEW_NOTES",
+    citations: [citation],
+    sourceId: "s1",
+    versionId: "v1",
+  };
+  pedigree.gaps = [
+    {
+      ...createGap(project.id),
+      id: "gap1",
+      revision: 2,
+      title: "Field transfer",
+      claimIds: ["c1"],
+      taskIds: ["t1"],
+      passageIds: ["p2"],
+    },
+  ];
+  pedigree.decisions = [
+    {
+      ...createDecision(project.id),
+      id: "decision1",
+      title: "Pilot before rollout",
+      claimIds: ["c1"],
+      assumptionIds: ["a1"],
+      outputIds: ["report1"],
+    },
+  ];
+  deliveryPlan.gapRefs = [{ id: "gap1", revision: 1 }];
+  deliveryPlan.findingRefs = [{ id: "f1", revision: 1 }];
+  deliveryPlan.tasks[0].requirement = "Record field observations";
+  deliveryPlan.tasks[0].acceptanceTest = "Protocol captures all observations";
+  deliveryPlan.tasks[0].verificationEvidence = [
+    { passageId: "p1", sourceId: "s1", versionId: "v1" },
+  ];
   return { project, research, pedigree, passages };
 }
 
 describe("Power BI research data handoff", () => {
+  it("exports the current research-to-delivery chain without counting analytical copies as evidence", () => {
+    const f = fixture(),
+      files = buildPowerBiFiles(f.project, f.research, f.pedigree, f.passages);
+    expect(parseCsv(files["sources.csv"])[2]).toMatchObject({
+      derived: "true",
+      includedEvidence: "false",
+      evidenceRole: "historical-analytical-copy",
+    });
+    expect(parseCsv(files["research_gaps.csv"])[0]).toMatchObject({
+      id: "gap1",
+      revision: "2",
+      status: "open",
+    });
+    expect(parseCsv(files["decisions.csv"])[0].id).toBe("decision1");
+    expect(parseCsv(files["gap_research_tasks.csv"])).toEqual([
+      { gapId: "gap1", taskId: "t1" },
+    ]);
+    expect(parseCsv(files["decision_reports.csv"])).toEqual([
+      { decisionId: "decision1", reportId: "report1" },
+    ]);
+    expect(parseCsv(files["accepted_reviews.csv"])[0]).toMatchObject({
+      claimId: "c1",
+      runId: "run1",
+      citationCount: "1",
+    });
+    expect(parseCsv(files["accepted_review_citations.csv"])[0]).toMatchObject({
+      reviewId: "c1",
+      passageId: "p1",
+      quotationLocationStatus: "verified",
+    });
+    expect(
+      parseCsv(files["delivery_record_references.csv"]).find(
+        (r) => r.recordKind === "gap",
+      ),
+    ).toMatchObject({ recordRevision: "1", currentRevisionMatches: "false" });
+    expect(parseCsv(files["work_package_verification.csv"])[0]).toMatchObject({
+      passageId: "p1",
+      versionId: "v1",
+    });
+    expect(parseCsv(files["delivery_work_packages.csv"])[0]).toMatchObject({
+      requirement: "Record field observations",
+      acceptanceTest: "Protocol captures all observations",
+    });
+  });
+
   it("retains contradictions, unknown independence and qualitative confidence separately from citation integrity", () => {
     const f = fixture(),
       files = buildPowerBiFiles(f.project, f.research, f.pedigree, f.passages);

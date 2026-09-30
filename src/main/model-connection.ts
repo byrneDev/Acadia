@@ -1,6 +1,6 @@
 import type { AISettings } from "../shared/types";
 import type { AIConnectionResult, LocalModel } from "../shared/desktop";
-import { readBoundedJSON, resolveAIEndpoint } from "./analysis";
+import { readBoundedJSON, resolveAIEndpoint, requestResearchModel } from "./analysis";
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -106,4 +106,17 @@ export async function testAIConnection(
     message:
       "Service reachable and selected model listed. No research content was sent; generation and billing availability have not been tested.",
   };
+}
+
+/** User-initiated synthetic generation: never includes project content or starts on discovery. */
+export async function testAIGeneration(settings: AISettings): Promise<AIConnectionResult> {
+  if(settings.provider === "offline") return {ok:true,message:"Offline outlines do not use a model. No request was sent."};
+  const response=await requestResearchModel(settings,[
+    {role:"system",content:'This is an application compatibility test with fictional data. Return only valid JSON with exactly one field: {"answer":"4"}.'},
+    {role:"user",content:"What is 2 + 2? Return the required JSON."},
+  ],undefined,{maxTokens:256,timeoutMs:120_000,jsonSchema:{type:"object",properties:{answer:{type:"string",enum:["4"]}},required:["answer"],additionalProperties:false}});
+  let data:unknown;
+  try { data=JSON.parse(response.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/, "")); } catch { throw new Error("The model generated text, but did not produce the required JSON. This configuration has not passed structured-generation compatibility."); }
+  if(!data || typeof data!=="object" || Object.keys(data).length!==1 || (data as {answer?:unknown}).answer!=="4") throw new Error("The model did not pass the synthetic generation check. Research accuracy has not been assessed.");
+  return {ok:true,message:"Synthetic generation passed: reachable service, accepted credentials/model, and valid structured response. No research content was sent. This does not establish research accuracy."};
 }

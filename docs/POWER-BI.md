@@ -19,20 +19,24 @@ Relationships are recommendations, not automatic model changes. Power BI needs a
 
 ## Included data
 
-| Tables                                                                    | Meaning                                                                                       |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `projects`, `briefs`                                                      | Investigation question and current research brief                                             |
-| `sources`, `source_versions`, `passages`                                  | Source identities, hashes, acquisition dates, extraction coverage and exact passage locators  |
-| `claims`, `evidence_links`, `findings`                                    | Claims, supporting and conflicting links, current researcher assessments                      |
-| `appraisals`, `appraisal_passages`, `origins`                             | Appraisals tied to exact versions and proposed/confirmed/rejected shared-origin relationships |
-| `assumptions` and association tables                                      | Assumptions, validation needs and linked evidence/claims                                      |
-| `methods`, `method_rows`, `hypothesis_evaluations` and association tables | Hypotheses, SWOT, Why chains, risk and TRL worksheets with their typed fields                 |
-| `research_tasks`, `task_sources`                                          | Follow-up work tied to claims, assumptions or method gaps                                     |
-| `review_issues` and association tables                                    | Review issues, disposition and linked evidence/work                                           |
-| `analyses`, `analysis_source_versions`, `analysis_citations`              | Run metadata and source/citation relationships without requests or responses                  |
-| `reports`, `report_revisions`, `report_citations`                         | Report metadata, saved revision identities, release selection and citation locators           |
-| `delivery_plans`, `delivery_work_packages`, `work_package_dependencies`   | Editable or historical delivery plans and their work/dependency relationships                 |
-| `quality_warnings`                                                        | Current deterministic completeness warnings from Acadia                                       |
+| Tables                                                                     | Meaning                                                                                       |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `projects`, `briefs`                                                       | Investigation question and current research brief                                             |
+| `sources`, `source_versions`, `passages`                                   | Source identities, hashes, acquisition dates, extraction coverage and exact passage locators  |
+| `claims`, `evidence_links`, `findings`                                     | Claims, supporting and conflicting links, current researcher assessments                      |
+| `appraisals`, `appraisal_passages`, `origins`                              | Appraisals tied to exact versions and proposed/confirmed/rejected shared-origin relationships |
+| `assumptions` and association tables                                       | Assumptions, validation needs and linked evidence/claims                                      |
+| `methods`, `method_rows`, `hypothesis_evaluations` and association tables  | Hypotheses, SWOT, Why chains, risk and TRL worksheets with their typed fields                 |
+| `research_tasks`, `task_sources`                                           | Follow-up work tied to claims, assumptions or method gaps                                     |
+| `research_gaps`, `gap_claims`, `gap_research_tasks`, `gap_passages`        | Current manually reviewed gaps and their linked evidence/work                                 |
+| `decisions`, `decision_claims`, `decision_assumptions`, `decision_reports` | Current decisions and the findings, assumptions and reports behind them                       |
+| `accepted_reviews`, `accepted_review_citations`                            | Human acceptance provenance and exact saved reference locations, without note bodies          |
+| `review_issues` and association tables                                     | Review issues, disposition and linked evidence/work                                           |
+| `analyses`, `analysis_source_versions`, `analysis_citations`               | Run metadata and source/citation relationships without requests or responses                  |
+| `reports`, `report_revisions`, `report_citations`                          | Report metadata, saved revision identities, release selection and citation locators           |
+| `delivery_plans`, `delivery_work_packages`, `work_package_dependencies`    | Editable or historical delivery plans and their work/dependency relationships                 |
+| `delivery_record_references`, `work_package_verification`                  | Exact gap/finding revision references and verification passage/source/version tuples          |
+| `quality_warnings`                                                         | Current deterministic completeness warnings from Acadia                                       |
 
 The data dictionary lists every column, type, nullable state, table grain, key, relationship and exported row count. Assessment tables hold current revisions only. Report revisions are listed separately; the export does not contain a full pedigree revision history or the contents of immutable analysis snapshots.
 
@@ -41,6 +45,9 @@ The data dictionary lists every column, type, nullable state, table grain, key, 
 - **Confidence** is the researcher's qualitative `unassessed`, `low`, `moderate` or `high` judgement. It is not a probability, a citation-validation result or proof that a finding is true.
 - **Support review** records the researcher's assessment of whether evidence supports a claim. Supporting and conflicting links remain separate records.
 - **Quotation location status** checks the saved source version, passage and quote locally. A verified location does not establish relevance, causation, independent corroboration or claim support. `recordedVerified` retains the earlier recorded citation flag; the separately exported location status reflects this export's local check.
+- **Source classification** distinguishes source-library evidence from historical analytical copies. Keep all rows for citation joins; filter `includedEvidence = true` for included library-source counts. `derived = true` identifies analytical copies that must not count as new evidence. Source-file counts still do not count independent origins.
+- **Accepted reviews** record human acceptance, not a supported finding. Join their canonical claim to inspect current support assessments and retain contradictory links.
+- **Gap resolution** is a separate researcher action. A complete work package or attached verification passage does not resolve the gap automatically.
 - **Source independence** remains `unassessed` when no confirmed origin relationship is known. Proposed or rejected relationships do not prove independence. Duplicate files are labeled and must not be counted as independent evidence.
 - **Extraction status and units** show readiness and coverage. A partial, failed, OCR-needed or cancelled extraction is not a fully analyzed document. OCR text has a distinct extraction method.
 - **Quality warnings** are local completeness checks, not a numerical quality score. An empty warning table does not establish a sound conclusion.
@@ -54,12 +61,14 @@ CSV values that could become spreadsheet formulas are prefixed with an apostroph
 
 A work package or citation can occur in an editable draft and multiple saved revisions. Export keys include report/revision scope so each row remains unique. Filter `delivery_plans.scope` or `report_citations.scope` before counting current work or references. Use `report_revisions.isReleased` to find the selected released revision. Do not add historical work-package rows to the current workload.
 
+Delivery references pin `recordRevision`; `currentRevisionMatches` reports whether the live gap/finding still has that revision. Joins to current record tables expose current labels and assessments, not historical assessment contents. Preserve the `.acadia` archive for exact revision inspection. Requirements, learning objectives and acceptance tests are separate work-package columns.
+
 Bridge tables describe associations; their row counts are not counts of independent observations. Self-links for duplicate sources, Why-chain parents and work-package dependencies should use an inactive relationship or a separate dimension for each role. Polymorphic review targets (`targetKind` and `targetId`) must not be joined indiscriminately to every possible target table.
 
 Snapshot IDs and source-analysis IDs preserve provenance references; snapshot contents and deleted reports are not supplied by this bundle. Missing historical or legacy references must remain visible as missing rather than receiving fabricated replacement records. Follow passage/version identifiers in Acadia to inspect the actual source.
 
 ## Excluded by default
 
-The bundle excludes original files, source URLs (which may contain tokens), extracted passage text, quotation text, report bodies, model prompts/responses/request payloads, credentials, endpoint URLs, raw extraction errors and rebuildable search indexes. It retains researcher-written brief, appraisal, finding, assumption, method, issue and work-package fields; those remain potentially sensitive research content.
+The bundle excludes original files, source URLs (which may contain tokens), extracted passage text, quotation text, accepted Reviewer Notes bodies, report bodies, model prompts/responses/request payloads, credentials, endpoint URLs, raw extraction errors and rebuildable search indexes. It retains researcher-written brief, appraisal, finding, assumption, method, issue and work-package fields; those remain potentially sensitive research content.
 
 The exporter and import script are covered by local format, privacy, key and relationship tests. A live Power BI Desktop import/model has to be checked on a Windows installation; local tests do not establish native Power BI validation.

@@ -1,26 +1,11 @@
-import {
-  useCallback,
-  useEffect,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
-import type { Passage, ResearchState } from "../../shared/research";
-
-type DraftSession<T> = { value: T; dirty: boolean; saving: boolean };
-const drafts = new Map<string, DraftSession<unknown>>();
-const draftListeners = new Map<string, Set<() => void>>();
-
-function draftSession<T>(key: string, initial: T): DraftSession<T> {
-  if (!drafts.has(key))
-    drafts.set(key, { value: initial, dirty: false, saving: false });
-  return drafts.get(key) as DraftSession<T>;
-}
-
-function publishDraft<T>(key: string, session: DraftSession<T>) {
-  drafts.set(key, session);
-  draftListeners.get(key)?.forEach((listener) => listener());
-}
+import { useEffect, useState, type ReactNode } from "react";
+import type {
+  Passage,
+  ResearchState,
+  ResearchDraftKind,
+} from "../../shared/research";
+import { useDurableDraft } from "./durableDrafts";
+import { DraftStatus, type DraftStatusValue } from "./DraftStatus";
 
 function olderRevision(current: unknown, incoming: unknown) {
   return Boolean(
@@ -70,70 +55,23 @@ export function reconcileSavedDraft<T>(
   return { value: current, dirty: true };
 }
 
-/** Private session drafts survive navigation; saving remains an explicit action. */
+/** Private drafts survive restart; committing an assessment remains explicit. */
 export function usePedigreeDraft<T>(key: string, initial: T) {
-  const subscribe = useCallback(
-    (listener: () => void) => {
-      let listeners = draftListeners.get(key);
-      if (!listeners) draftListeners.set(key, (listeners = new Set()));
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-        if (!listeners.size) draftListeners.delete(key);
-      };
-    },
-    [key],
-  );
-  const session = useSyncExternalStore(
-    subscribe,
-    () => draftSession(key, initial),
-    () => draftSession(key, initial),
-  );
-  const initialText = JSON.stringify(initial);
-  useEffect(() => {
-    const current = draftSession(key, initial);
-    if (
-      !current.dirty &&
-      !current.saving &&
-      !olderRevision(current.value, initial) &&
-      JSON.stringify(current.value) !== initialText
-    )
-      publishDraft(key, { ...current, value: initial });
-  }, [key, initialText]);
-  function edit(next: T) {
-    publishDraft(key, {
-      ...draftSession(key, initial),
-      value: next,
-      dirty: true,
-    });
-  }
-  function acceptSaved(submitted: T, next: T, reset?: T) {
-    const current = draftSession(key, initial);
-    if (olderRevision(current.value, next)) return;
-    const result = reconcileSavedDraft(
-      current.dirty ? current.value : undefined,
-      submitted,
-      next,
-      reset,
-    );
-    publishDraft(key, { ...current, ...result });
-  }
-  function saved(next: T, reset?: T) {
-    acceptSaved(session.value, next, reset);
-  }
-  async function persist(work: (value: T) => Promise<T>, reset?: T) {
-    const current = draftSession(key, initial);
-    if (current.saving) throw new Error("This assessment is already saving.");
-    publishDraft(key, { ...current, saving: true });
-    try {
-      const next = await work(current.value);
-      acceptSaved(current.value, next, reset);
-      return next;
-    } finally {
-      publishDraft(key, { ...draftSession(key, initial), saving: false });
-    }
-  }
-  return { ...session, edit, saved, persist };
+  const [kind, projectId, ...target] = key.split(":");
+  const value = initial as { revision?: number; id?: string };
+  return useDurableDraft({
+    projectId,
+    key,
+    kind: (kind === "issue" ? "review-issue" : kind) as ResearchDraftKind,
+    // New review issues use composite routing keys (finding:<id>:new),
+    // which are not saved record identifiers. Only bind stable record keys.
+    targetId:
+      target.length === 1 && target[0] !== "new" ? target[0] : undefined,
+    initial,
+    baseSignature: value.revision
+      ? `${value.id}:${value.revision}`
+      : "unrecorded",
+  });
 }
 
 export function TextField({
@@ -217,6 +155,7 @@ export function FormActions({
   label = "Save assessment",
   notice,
   children,
+  draft,
 }: {
   busy: boolean;
   disabled?: boolean;
@@ -224,20 +163,32 @@ export function FormActions({
   label?: string;
   notice?: string;
   children?: ReactNode;
+  draft?: DraftStatusValue;
 }) {
   return (
-    <div className="pedigree-actions">
-      <button
-        className="button primary"
-        disabled={busy || disabled}
-        type="submit"
-      >
-        {busy ? "Saving…" : label}
-      </button>
-      {children}
-      {notice && <span role="status">{notice}</span>}
-      {dirty && <span>Unsaved changes · kept for this session</span>}
-    </div>
+    <>
+      <div className="pedigree-actions">
+        <button
+          className="button primary"
+          disabled={
+            busy ||
+            disabled ||
+            draft?.loading ||
+            draft?.conflict ||
+            draft?.committing
+          }
+          type="submit"
+        >
+          {busy ? "Saving…" : label}
+        </button>
+        {children}
+        {notice && <span role="status">{notice}</span>}
+        {dirty && !draft && (
+          <span>Editing private draft · Save assessment to apply</span>
+        )}
+      </div>
+      {draft && <DraftStatus draft={draft} />}
+    </>
   );
 }
 

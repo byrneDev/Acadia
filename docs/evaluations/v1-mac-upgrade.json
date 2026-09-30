@@ -1,0 +1,17 @@
+{
+  "recordedAt": "2026-09-30T14:19:01.982Z",
+  "platform": "darwin-arm64",
+  "from": "0.5.0",
+  "to": "1.0.0-rc.1",
+  "scope": "Isolated fictional profile; actual published v0.5 app followed by locally packaged RC. Not an installer/Gatekeeper, Windows or Ubuntu upgrade check.",
+  "checks": {
+    "projectIdentity": true,
+    "boardPosition": true,
+    "originalAssetIdentity": true,
+    "historicalVersionsUnchanged": true,
+    "historicalPassagesUnchanged": true,
+    "automaticWholeLibraryBackup": true,
+    "backupOriginalHash": "277aa7778dddd1a925446c4994bf5a0cc7772312fe6c83543458fb49cb568b44"
+  },
+  "backupFiles": 3
+}

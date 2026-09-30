@@ -15,6 +15,7 @@ import { Plus, Minus, Scan, Hand, Maximize, X, Link2 } from "lucide-react";
 import type { Connection, Project, ResearchCard } from "../../shared/types";
 import ResearchNode from "./ResearchNode";
 import type { BoardPresentation } from "./boardPresentation";
+import { keyboardBoardPositions } from "./boardKeyboard";
 import {
   readBoardViewport,
   saveBoardViewport,
@@ -87,6 +88,7 @@ function Board(props: Props) {
   } = props;
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [panMode, setPanMode] = useState(false);
+  const [moveNotice, setMoveNotice] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [initialViewport] = useState(() => readBoardViewport(project.id));
   const [zoom, setZoom] = useState(initialViewport?.zoom || 1);
@@ -272,6 +274,40 @@ function Board(props: Props) {
           e.currentTarget.focus({ preventScroll: true });
       }}
       aria-label="Research board. F fits the board. C connects the selected item. Shift F10 opens board actions."
+      onKeyDownCapture={(event) => {
+        const target = event.target as HTMLElement;
+        if (
+          panMode ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.altKey ||
+          target.closest(
+            "input,textarea,select,button,a,[contenteditable=true]",
+          ) ||
+          !target.closest(".react-flow__node, .react-flow__nodesselection")
+        )
+          return;
+        const positions = keyboardBoardPositions(
+          nodes,
+          event.key,
+          event.shiftKey,
+        );
+        if (!positions.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setNodes((current) =>
+          current.map((node) => {
+            const position = positions.find((entry) => entry.id === node.id);
+            return position
+              ? { ...node, position: { x: position.x, y: position.y } }
+              : node;
+          }),
+        );
+        onMove(positions);
+        setMoveNotice(
+          `${positions.length} item${positions.length === 1 ? "" : "s"} moved ${event.key.replace("Arrow", "").toLowerCase()}. Undo is available.`,
+        );
+      }}
       onKeyDown={(e) => {
         const target = e.target as HTMLElement;
         if (
@@ -361,6 +397,7 @@ function Board(props: Props) {
         fitViewOptions={{ padding: 0.17, maxZoom: 0.95 }}
         minZoom={0.12}
         maxZoom={2.5}
+        onlyRenderVisibleElements={project.cards.length > 150}
         deleteKeyCode={null}
         nodesDraggable={!panMode}
         panOnDrag={panMode ? [0, 1, 2] : [1, 2]}
@@ -395,6 +432,9 @@ function Board(props: Props) {
           ariaLabel="Research board overview"
         />
       </ReactFlow>
+      <span className="sr-only" role="status">
+        {moveNotice}
+      </span>
       <div className="board-areas">
         <button
           disabled={!selectedId}

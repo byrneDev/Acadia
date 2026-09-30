@@ -8,6 +8,7 @@ import type {
 import type { Project } from "../../shared/types";
 import type { ResearchState, SearchHit } from "../../shared/research";
 import { Modal } from "./Dialogs";
+import { PageNavigation, SearchPages } from "./SearchPages";
 import type { PedigreeState } from "../../shared/pedigree";
 import type { BoardReference } from "../../shared/board";
 
@@ -454,20 +455,30 @@ export function InvestigationSearch({
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState("all");
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [sourcePage, setSourcePage] = useState(0);
+  const [sourceTotal, setSourceTotal] = useState(0);
+  useEffect(() => setSourcePage(0), [query, scope]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let alive = true;
     setHits([]);
+    setSourceTotal(0);
     setError("");
     setBusy(false);
     if (query.trim().length < 2 || !["all", "sources"].includes(scope)) return;
     setBusy(true);
     const timer = setTimeout(() => {
       window
-        .acadia!.searchSources(query)
+        .acadia!.searchSourcesPage(query, {
+          offset: sourcePage * 30,
+          limit: 30,
+        })
         .then((h) => {
-          if (alive) setHits(h);
+          if (alive) {
+            setHits(h.items);
+            setSourceTotal(h.total);
+          }
         })
         .catch((e) => {
           if (alive) setError(String(e));
@@ -480,22 +491,20 @@ export function InvestigationSearch({
       alive = false;
       clearTimeout(timer);
     };
-  }, [query, scope, project.id]);
+  }, [query, scope, project.id, sourcePage]);
   const q = query.toLowerCase().trim();
   const match = (text: string) =>
     q.length >= 2 && text.toLowerCase().includes(q);
   const cards = ["all", "board"].includes(scope)
-    ? project.cards.filter((c) => match(`${c.title} ${c.content}`)).slice(0, 20)
+    ? project.cards.filter((c) => match(`${c.title} ${c.content}`))
     : [];
   const reports = ["all", "reports"].includes(scope)
-    ? project.outputs
-        .filter((o) => match(`${o.title} ${o.markdown}`))
-        .slice(0, 10)
+    ? project.outputs.filter((o) => match(`${o.title} ${o.markdown}`))
     : [];
   const claims = ["all", "evidence"].includes(scope)
-    ? research.claims
-        .filter((c) => match(`${c.title} ${c.itemReview?.notes || ""}`))
-        .slice(0, 15)
+    ? research.claims.filter((c) =>
+        match(`${c.title} ${c.itemReview?.notes || ""}`),
+      )
     : [];
   const linkedRecords: {
     reference: BoardReference;
@@ -534,9 +543,7 @@ export function InvestigationSearch({
           label: "Research method",
           detail: record.objective,
         })),
-      ]
-        .filter((record) => match(`${record.title} ${record.detail}`))
-        .slice(0, 25)
+      ].filter((record) => match(`${record.title} ${record.detail}`))
     : [];
   const choose = (f: () => void) => {
     onClose();
@@ -575,43 +582,76 @@ export function InvestigationSearch({
         </select>
       </div>
       <div className="search-results">
-        {cards.map((c) => (
-          <button key={c.id} onClick={() => choose(() => onCard(c.id))}>
-            <small>Board · {c.kind}</small>
-            <strong>{c.title}</strong>
-            <span>{c.content.slice(0, 160)}</span>
-          </button>
-        ))}
-        {hits.slice(0, 30).map((p) => (
-          <button key={p.id} onClick={() => choose(() => onPassage(p))}>
-            <small>Source passage · {p.locator}</small>
-            <strong>{p.sourceTitle}</strong>
-            <span>{p.text.slice(0, 220)}</span>
-          </button>
-        ))}
-        {claims.map((c) => (
-          <button key={c.id} onClick={() => choose(() => onEvidence(c.id))}>
-            <small>Evidence claim</small>
-            <strong>{c.title}</strong>
-          </button>
-        ))}
-        {onRecord &&
-          linkedRecords.map((record) => (
-            <button
-              key={`${record.reference.kind}:${record.reference.id}`}
-              onClick={() => choose(() => onRecord(record.reference))}
-            >
-              <small>{record.label}</small>
-              <strong>{record.title}</strong>
-              <span>{record.detail.slice(0, 160)}</span>
+        <SearchPages
+          key={`board:${query}:${scope}`}
+          title="Board items"
+          items={cards}
+          render={(c) => (
+            <button key={c.id} onClick={() => choose(() => onCard(c.id))}>
+              <small>Board · {c.kind}</small>
+              <strong>{c.title}</strong>
+              <span>{c.content.slice(0, 160)}</span>
+            </button>
+          )}
+        />
+        <section aria-label="Source passage search results">
+          {sourceTotal > 0 && <h3>Source passages ({sourceTotal})</h3>}
+          {hits.map((p) => (
+            <button key={p.id} onClick={() => choose(() => onPassage(p))}>
+              <small>Source passage · {p.locator}</small>
+              <strong>{p.sourceTitle}</strong>
+              <span>{p.text.slice(0, 220)}</span>
             </button>
           ))}
-        {reports.map((o) => (
-          <button key={o.id} onClick={() => choose(() => onReport(o.id))}>
-            <small>Report</small>
-            <strong>{o.title}</strong>
-          </button>
-        ))}
+          {sourceTotal > 0 && (
+            <PageNavigation
+              label="Source passages"
+              offset={sourcePage * 30}
+              limit={30}
+              total={sourceTotal}
+              onChange={(offset) => setSourcePage(offset / 30)}
+            />
+          )}
+        </section>
+        <SearchPages
+          key={`claims:${query}:${scope}`}
+          title="Evidence"
+          items={claims}
+          render={(c) => (
+            <button key={c.id} onClick={() => choose(() => onEvidence(c.id))}>
+              <small>Evidence claim</small>
+              <strong>{c.title}</strong>
+            </button>
+          )}
+        />
+        {onRecord && (
+          <SearchPages
+            key={`records:${query}:${scope}`}
+            title="Research records"
+            items={linkedRecords}
+            render={(record) => (
+              <button
+                key={`${record.reference.kind}:${record.reference.id}`}
+                onClick={() => choose(() => onRecord(record.reference))}
+              >
+                <small>{record.label}</small>
+                <strong>{record.title}</strong>
+                <span>{record.detail.slice(0, 160)}</span>
+              </button>
+            )}
+          />
+        )}
+        <SearchPages
+          key={`reports:${query}:${scope}`}
+          title="Reports"
+          items={reports}
+          render={(o) => (
+            <button key={o.id} onClick={() => choose(() => onReport(o.id))}>
+              <small>Report</small>
+              <strong>{o.title}</strong>
+            </button>
+          )}
+        />
         <p role="status" className="muted">
           {q.length < 2
             ? "Enter at least two characters. Search stays within this investigation."

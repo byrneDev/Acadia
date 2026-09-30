@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ResearchStore,
   validateResearchArchive,
@@ -23,6 +23,12 @@ import type { ResearchJob } from "../src/shared/research";
 
 const roots: string[] = [];
 const stores: ResearchStore[] = [];
+const ingestions = new Set<Ingestion>();
+function ingestion(...args: ConstructorParameters<typeof Ingestion>) {
+  const service = new Ingestion(...args);
+  ingestions.add(service);
+  return service;
+}
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "acadia-evidence-"));
   roots.push(root);
@@ -34,6 +40,11 @@ async function fixture() {
   return { root, store, project };
 }
 afterEach(async () => {
+  // A harness timeout does not stop asynchronous extraction. Settle services
+  // before closing SQLite, just as application shutdown does.
+  await Promise.all([...ingestions].map((service) => service.shutdown()));
+  ingestions.clear();
+  vi.restoreAllMocks();
   for (const store of stores.splice(0))
     try {
       store.close();
@@ -151,7 +162,7 @@ describe("normalized evidence foundation", () => {
       "[This PDF has no extractable text. OCR is not included; open the original.]";
     const positions = project.cards.map((c) => [c.x, c.y]);
     store.saveProject(project);
-    expect(project.schemaVersion).toBe(4);
+    expect(project.schemaVersion).toBe(5);
     expect(project.cards.map((c) => [c.x, c.y])).toEqual(positions);
     expect(project.cards[0].extraction).toBeUndefined();
     expect(store.getSource(project.cards[0].sourceId!).passages).toHaveLength(
@@ -316,7 +327,7 @@ describe("complete document ingestion and safe capture", () => {
     await writeFile(join(root, "assets", name), pdf(205));
     project.cards = [{ ...card(project, 1, ""), kind: "document", assetId }];
     store.saveProject(project);
-    const service = new Ingestion(store, root, () => ({
+    const service = ingestion(store, root, () => ({
       id: assetId,
       fileName: "long.pdf",
       storedName: name,
@@ -339,7 +350,7 @@ describe("complete document ingestion and safe capture", () => {
     await writeFile(join(root, "assets", name), pdf(1, true));
     project.cards = [{ ...card(project, 1, ""), kind: "document", assetId }];
     store.saveProject(project);
-    const service = new Ingestion(store, root, () => ({
+    const service = ingestion(store, root, () => ({
       id: assetId,
       fileName: "scan.pdf",
       storedName: name,
@@ -364,7 +375,7 @@ describe("complete document ingestion and safe capture", () => {
     );
     project.cards = [{ ...card(project, 1, ""), kind: "document", assetId }];
     store.saveProject(project);
-    const service = new Ingestion(store, root, () => ({
+    const service = ingestion(store, root, () => ({
       id: assetId,
       fileName: "long.txt",
       storedName: name,
@@ -396,7 +407,7 @@ describe("complete document ingestion and safe capture", () => {
     await writeFile(join(root, "assets", name), canvas.toBuffer("image/png"));
     project.cards = [{ ...card(project, 1, ""), kind: "image", assetId }];
     store.saveProject(project);
-    const service = new Ingestion(store, root, () => ({
+    const service = ingestion(store, root, () => ({
       id: assetId,
       fileName: "scan.png",
       storedName: name,
@@ -413,6 +424,101 @@ describe("complete document ingestion and safe capture", () => {
     expect(detail.passages[0].text).toMatch(/evidence remains traceable/i);
     expect(detail.versions.at(-1)?.status).toBe("ready");
   }, 30000);
+  it("rolls back an incomplete paragraph batch while retaining committed coverage and search", async () => {
+    const { root, store, project } = await fixture();
+    const assetId = randomUUID(),
+      name = `${assetId}.txt`;
+    await writeFile(
+      join(root, "assets", name),
+      Array.from(
+        { length: 60 },
+        (_, i) => `Batchmarker${i + 1} source paragraph.`,
+      ).join("\n\n"),
+    );
+    project.cards = [{ ...card(project, 1, ""), kind: "document", assetId }];
+    store.saveProject(project);
+    const service = ingestion(store, root, () => ({
+      id: assetId,
+      fileName: "batches.txt",
+      storedName: name,
+      mimeType: "text/plain",
+      size: 3000,
+    }));
+    const add = store.addPassage.bind(store);
+    vi.spyOn(store, "addPassage").mockImplementation((passage) => {
+      if (passage.paragraph === 27) throw new Error("Simulated write failure");
+      add(passage);
+    });
+    const job = await complete(
+      store,
+      service.startFile(project.id, project.cards[0].sourceId!),
+    );
+    await service.shutdown();
+    expect(job.status).toBe("failed");
+    expect(job.message).toContain("Simulated write failure");
+    const detail = store.getSource(project.cards[0].sourceId!);
+    expect(detail.passages).toHaveLength(25);
+    expect(detail.versions.at(-1)).toMatchObject({
+      status: "failed",
+      processedUnits: 25,
+      totalUnits: 60,
+    });
+    expect(store.search(project.id, "Batchmarker25")).toHaveLength(1);
+    expect(store.search(project.id, "Batchmarker26")).toHaveLength(0);
+  });
+  it("settles active and queued extraction jobs before shutdown closes the library", async () => {
+    const { root, store, project } = await fixture();
+    const assetId = randomUUID(),
+      name = `${assetId}.txt`;
+    await writeFile(
+      join(root, "assets", name),
+      Array(1000).fill("Recoverable source paragraph.").join("\n\n"),
+    );
+    project.cards = Array.from({ length: 5 }, (_, index) => ({
+      ...card(project, index + 1, ""),
+      kind: "document" as const,
+      assetId,
+    }));
+    store.saveProject(project);
+    const service = ingestion(store, root, () => ({
+      id: assetId,
+      fileName: "original.txt",
+      storedName: name,
+      mimeType: "text/plain",
+      size: 30000,
+    }));
+    let jobs: ResearchJob[] = [];
+    try {
+      jobs = project.cards.map((card) =>
+        service.startFile(project.id, card.sourceId!),
+      );
+    } finally {
+      await service.shutdown();
+    }
+    expect(jobs.map((job) => store.getJob(job.id)?.status)).toEqual(
+      Array(5).fill("cancelled"),
+    );
+    expect(() =>
+      service.startFile(project.id, project.cards[0].sourceId!),
+    ).toThrow(/shutting down/);
+    const restarted = ingestion(store, root, () => ({
+      id: assetId,
+      fileName: "original.txt",
+      storedName: name,
+      mimeType: "text/plain",
+      size: 30000,
+    }));
+    try {
+      expect((await complete(store, restarted.retry(jobs[0].id))).status).toBe(
+        "completed",
+      );
+      expect(store.getSource(project.cards[0].sourceId!).passages).toHaveLength(
+        1000,
+      );
+    } finally {
+      await restarted.shutdown();
+    }
+  });
   it("sanitizes web snapshots with stable readable paragraphs and rejects private network addresses", () => {
     const article = readableSnapshot(
       "<html><title>Research</title><body><article><h1>Research</h1><p>" +

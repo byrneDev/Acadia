@@ -6,7 +6,7 @@ export function snapshotPlanContext(
   analysis: ResearchOutput,
 ): ProjectPlanContext {
   return {
-    ...plan,
+    ...structuredClone(plan),
     analysisTitle: analysis.title,
     analysisMarkdown: reportToMarkdown(
       reportDocument(analysis),
@@ -26,10 +26,13 @@ export function projectPlanInstructions(
 DELIVERABLE TYPE: ${context.deliverableType}
 DELIVERABLE: ${context.deliverable}
 GAP TO BRIDGE: ${context.gap}
+SAVED GAP REVISIONS: ${(context.gapRefs || []).map((ref) => `${ref.id} revision ${ref.revision}`).join("; ") || "None linked"}
+SAVED FINDING REVISIONS: ${(context.findingRefs || []).map((ref) => `${ref.id} revision ${ref.revision}`).join("; ") || "None linked"}
 RESEARCHER ACCEPTANCE CRITERIA: ${context.acceptanceCriteria || "Not yet specified; propose criteria for review."}
 ANALYSIS: ${context.analysisTitle} (report ${context.analysisOutputId}${context.analysisRevisionId ? `, revision ${context.analysisRevisionId}` : ", selected draft snapshot"})
 <analysis-source>${context.analysisMarkdown}</analysis-source>
 The analysis citation labels are local to that historical report. Only cite references from the separately supplied evidence bundle in your new plan; do not reuse historical citation numbers without matching the source and passage.
+Completing proposed work does not establish that the original research gap is resolved. Specify verification evidence for human review; gap resolution remains a separate manual decision.
 Include: rationale and boundaries; measurable deliverables and acceptance tests; phase-by-phase work breakdown table (work package, output, dependencies, completion criteria); milestones and decision gates; required roles/resources and estimates marked TBD where unknown; risk/assumptions register; validation and evaluation; rollout/handoff/maintenance; unresolved research and limitations. Explain which observation would invalidate the proposed solution.
 ${
   context.deliverableType === "software"

@@ -245,8 +245,9 @@ function MethodEditor({
     project.privacy?.provider && project.privacy.provider !== "offline",
   );
   async function save() {
-    const saved = await window.acadia!.saveMethod(workingCopy.current);
-    draft.saved(saved);
+    const saved = await draft.persist((value) =>
+      window.acadia!.saveMethod(value),
+    );
     onSaved(saved);
     return saved;
   }
@@ -272,7 +273,7 @@ function MethodEditor({
       // A new worksheet must exist before a task can reference it.
       if (!before.revision) {
         const persisted = await window.acadia!.saveMethod(before);
-        draft.saved(persisted);
+        await draft.saved(persisted);
         onSaved(persisted);
         workingCopy.current = {
           ...workingCopy.current,
@@ -313,7 +314,7 @@ function MethodEditor({
         edit(linked);
         workingCopy.current = linked;
         const saved = await window.acadia!.saveMethod(linked);
-        draft.saved(saved);
+        await draft.saved(saved);
         onSaved(saved);
       }
       setNotice("Research task created and linked to this worksheet.");
@@ -619,6 +620,7 @@ function MethodEditor({
         <FormActions
           busy={busy}
           dirty={draft.dirty}
+          draft={draft}
           notice={notice}
           label="Save worksheet"
         >

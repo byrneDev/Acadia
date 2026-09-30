@@ -10,6 +10,11 @@ on:
         type: boolean
         required: false
         default: false
+      sign_candidate:
+        description: Require signing and notarization for a prerelease build (stable 1.x always requires both)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -25,6 +30,7 @@ defaults:
 env:
   CI: "true"
   CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  ACADIA_SIGN_CANDIDATE: ${{ inputs.sign_candidate == true }}
 
 jobs:
   metadata:
@@ -36,6 +42,9 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       publish: ${{ steps.version.outputs.publish }}
       notes: ${{ steps.version.outputs.notes }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      production: ${{ steps.version.outputs.production }}
+      signing: ${{ steps.version.outputs.signing }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,10 +59,38 @@ jobs:
           REQUEST_PUBLISH: ${{ github.event_name == 'push' || inputs.publish == true }}
         run: node .github/scripts/release-artifacts.cjs metadata
 
+  acceptance:
+    name: Validate external production acceptance
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: ${{ needs.metadata.outputs.production == 'true' && 'production-release' || 'release-candidate' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Require exact-commit human acceptance for stable 1.x
+        env:
+          ACADIA_RELEASE_ACCEPTANCE: ${{ vars.ACADIA_RELEASE_ACCEPTANCE }}
+        run: node .github/scripts/release-artifacts.cjs acceptance
+      - name: Retain production acceptance evidence
+        if: needs.metadata.outputs.production == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-acceptance
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
   package:
     name: Package and test (${{ matrix.platform }})
-    needs: metadata
-    timeout-minutes: 45
+    needs: [metadata, acceptance]
+    environment: ${{ needs.metadata.outputs.production == 'true' && 'production-release' || 'release-candidate' }}
+    timeout-minutes: 60
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -95,9 +132,29 @@ jobs:
       - name: Run unit and research acceptance tests
         run: npm test
       - name: Build native package without publishing
+        env:
+          REQUIRE_SIGNING: ${{ needs.metadata.outputs.signing }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ needs.metadata.outputs.signing == 'true' && 'true' || 'false' }}
+          CSC_LINK: ${{ runner.os == 'macOS' && needs.metadata.outputs.signing == 'true' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && needs.metadata.outputs.signing == 'true' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && needs.metadata.outputs.signing == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && needs.metadata.outputs.signing == 'true' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && needs.metadata.outputs.signing == 'true' && secrets.APPLE_TEAM_ID || '' }}
+          WIN_CSC_LINK: ${{ runner.os == 'Windows' && needs.metadata.outputs.signing == 'true' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && needs.metadata.outputs.signing == 'true' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
         run: |
           if [[ "$ACADIA_PACKAGE_SCRIPT" == "package:linux" ]]; then
             npm run "$ACADIA_PACKAGE_SCRIPT"
+          elif [[ "$REQUIRE_SIGNING" == "true" && "$RUNNER_OS" == "macOS" ]]; then
+            for credential in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+              if [[ -z "${!credential}" ]]; then echo "Missing required macOS distribution signing/notarization credential: $credential" >&2; exit 1; fi
+            done
+            npm run "$ACADIA_PACKAGE_SCRIPT" -- --publish never --config.forceCodeSigning=true --config.mac.identity= --config.mac.hardenedRuntime=true --config.mac.notarize=true
+          elif [[ "$REQUIRE_SIGNING" == "true" && "$RUNNER_OS" == "Windows" ]]; then
+            for credential in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+              if [[ -z "${!credential}" ]]; then echo "Missing required Windows distribution signing credential: $credential" >&2; exit 1; fi
+            done
+            npm run "$ACADIA_PACKAGE_SCRIPT" -- --publish never --config.forceCodeSigning=true
           else
             npm run "$ACADIA_PACKAGE_SCRIPT" -- --publish never
           fi
@@ -177,7 +234,7 @@ jobs:
 
   publish:
     name: Publish verified GitHub release
-    needs: [metadata, verify]
+    needs: [metadata, acceptance, verify]
     if: needs.metadata.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -203,11 +260,14 @@ jobs:
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
           RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
           RELEASE_NOTES: ${{ needs.metadata.outputs.notes }}
+          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
         run: |
           shopt -s nullglob
-          assets=(release-assets/*.deb release-assets/*.AppImage release-assets/*.zip release-assets/*.exe release-assets/SHA256SUMS.txt)
-          if [[ ${#assets[@]} -ne 5 ]]; then
-            echo "Expected four native downloads and one combined checksum file." >&2
+          assets=(release-assets/*.deb release-assets/*.AppImage release-assets/*.zip release-assets/*.exe release-assets/SHA256SUMS.txt release-assets/ASSURANCE-*.json)
+          if [[ ${#assets[@]} -ne 8 ]]; then
+            echo "Expected four native downloads, three assurance records and one combined checksum file." >&2
             exit 1
           fi
-          gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --title "Acadia $RELEASE_VERSION" --generate-notes --notes-file "$RELEASE_NOTES"
+          flags=()
+          if [[ "$PRERELEASE" == "true" ]]; then flags+=(--prerelease --latest=false); fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --title "Acadia $RELEASE_VERSION" --generate-notes --notes-file "$RELEASE_NOTES" "${flags[@]}"

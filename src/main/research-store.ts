@@ -1,10 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "../shared/types";
 import { validateProject, validateCitation } from "../shared/project";
 import { reportDocument, reportToMarkdown } from "../shared/report";
+import { validateDeliveryPlanReferences } from "../shared/pmis";
+import { RESEARCH_DRAFT_KINDS } from "../shared/research";
 import {
   validateBoardReference,
   boardReferenceKey,
@@ -17,7 +20,10 @@ import {
   type ItemInsight,
   type ItemInsightReview,
 } from "../shared/item-insight";
-import { associateQuotedText } from "../shared/pedigree-analysis";
+import {
+  associateQuotedText,
+  type SnapshotAnalysisContext,
+} from "../shared/pedigree-analysis";
 import type {
   AnalysisRun,
   DiscoveryCandidate,
@@ -33,6 +39,12 @@ import type {
   SourceDetail,
   SourceRecord,
   SourceVersion,
+  ResearchDraft,
+  ResearchDraftInput,
+  DraftJSONValue,
+  PageRequest,
+  ResearchPage,
+  PassagePolicyEntry,
 } from "../shared/research";
 import {
   createBrief,
@@ -65,6 +77,88 @@ const VALID_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 function checkId(id: unknown): asserts id is string {
   if (typeof id !== "string" || !VALID_ID.test(id))
     throw new Error("Invalid research identifier.");
+}
+function pageBounds(page: PageRequest = {}) {
+  const { offset = 0, limit = 50 } = page;
+  if (
+    !Number.isSafeInteger(offset) ||
+    offset < 0 ||
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > 200
+  )
+    throw new Error(
+      "Page offset must be non-negative and page size between 1 and 200.",
+    );
+  return { offset, limit };
+}
+function draftKey(key: unknown): asserts key is string {
+  if (
+    typeof key !== "string" ||
+    !key.trim() ||
+    key.length > 512 ||
+    /[\u0000-\u001f\u007f]/.test(key)
+  )
+    throw new Error("Invalid private draft key.");
+}
+function draftValue(value: unknown): DraftJSONValue {
+  let nodes = 0;
+  const visit = (v: unknown, depth: number): DraftJSONValue => {
+    if (++nodes > 100_000 || depth > 32)
+      throw new Error("Private draft is too complex.");
+    if (v === null || typeof v === "boolean" || typeof v === "string") return v;
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (Array.isArray(v)) return v.map((entry) => visit(entry, depth + 1));
+    if (
+      !v ||
+      typeof v !== "object" ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(v))
+    )
+      throw new Error("Private draft must contain ordinary JSON data.");
+    const next: Record<string, DraftJSONValue> = {};
+    for (const [key, entry] of Object.entries(v)) {
+      if (
+        ["__proto__", "prototype", "constructor"].includes(key) ||
+        /^(?:apikey|searchkey|accesstoken|refreshtoken|password|authorization|credential|credentials|secret|clientsecret)$/i.test(
+          key.replace(/[_-]/g, ""),
+        )
+      )
+        throw new Error(
+          "Private drafts cannot contain credentials or unsafe object keys.",
+        );
+      next[key] = visit(entry, depth + 1);
+    }
+    return next;
+  };
+  const result = visit(value, 0);
+  if (Buffer.byteLength(JSON.stringify(result), "utf8") > 2 * 1024 * 1024)
+    throw new Error("Private draft exceeds the 2 MB editing-buffer limit.");
+  return result;
+}
+function validateDraft(value: unknown, projectId: string): ResearchDraft {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid private draft.");
+  const d = value as ResearchDraft;
+  draftKey(d.key);
+  if (
+    d.projectId !== projectId ||
+    !RESEARCH_DRAFT_KINDS.includes(d.kind) ||
+    !Number.isSafeInteger(d.revision) ||
+    d.revision < 1 ||
+    typeof d.updatedAt !== "string" ||
+    !Number.isFinite(Date.parse(d.updatedAt))
+  )
+    throw new Error("Invalid private draft owner, type or revision.");
+  if (d.targetId !== undefined) checkId(d.targetId);
+  return {
+    key: d.key,
+    projectId,
+    kind: d.kind,
+    ...(d.targetId ? { targetId: d.targetId } : {}),
+    value: draftValue(d.value),
+    revision: d.revision,
+    updatedAt: d.updatedAt,
+  };
 }
 function cleanData<T>(value: T): T {
   return JSON.parse(
@@ -199,11 +293,12 @@ function policy(value: unknown): asserts value is Inclusion {
     throw new Error("Invalid inclusion policy.");
 }
 export interface ResearchArchive extends ResearchState {
-  schemaVersion: 2 | 3 | 4;
+  schemaVersion: 2 | 3 | 4 | 5;
   passages: Passage[];
   pedigree?: PedigreeState;
   pedigreeRevisions?: PedigreeRevision[];
   pedigreeSnapshots?: PedigreeSnapshot[];
+  drafts?: ResearchDraft[];
 }
 
 type PedigreeEvidence = Pick<
@@ -518,6 +613,13 @@ function validatedRunAudit(
     const pools = ["pins", "support", "counter", "gaps"] as const;
     result.retrieval = {
       policy: choice(manifest.policy, ["balanced-four-pools-v1"]),
+      ...(manifest.candidatePolicy === undefined
+        ? {}
+        : {
+            candidatePolicy: choice(manifest.candidatePolicy, [
+              "pin-independent-v1",
+            ] as const),
+          }),
       limits: {
         characters: number(limits.characters),
         passages: number(limits.passages),
@@ -602,30 +704,32 @@ function validatedRunAudit(
 /** Entity rows and FTS are separate from the lightweight board project. Original assets live on disk. */
 export class ResearchStore {
   private db: DatabaseSync;
+  private databasePath: string;
   private depth = 0;
   readonly migrationBackupPath?: string;
   constructor(storageRoot: string) {
     mkdirSync(storageRoot, { recursive: true });
     const databasePath = join(storageRoot, "research.sqlite");
+    this.databasePath = databasePath;
     const existed = existsSync(databasePath);
     this.db = new DatabaseSync(databasePath);
     const version = Number(
       (this.db.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
     );
-    if (version > 4) {
+    if (version > 5) {
       this.db.close();
       throw new Error(
         "This research database was created by a newer Acadia version. Open it with that version; no data was changed.",
       );
     }
     try {
-      if (existed && version < 4) {
+      if (existed && version < 5) {
         const recovery = join(storageRoot, "recovery");
         mkdirSync(recovery, { recursive: true });
         this.migrationBackupPath = join(
           recovery,
-          `schema-v${version || 2}-to-v4-${Date.now()}-${randomUUID()}.sqlite`,
+          `schema-v${version || 2}-to-v5-${Date.now()}-${randomUUID()}.sqlite`,
         );
         // VACUUM INTO takes a consistent SQLite snapshot, including committed WAL content.
         this.db.prepare("VACUUM INTO ?").run(this.migrationBackupPath);
@@ -669,13 +773,16 @@ export class ResearchStore {
       CREATE TABLE IF NOT EXISTS pedigree_revisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,entity_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,UNIQUE(entity_id,revision));
       CREATE INDEX IF NOT EXISTS pedigree_revision_project ON pedigree_revisions(project_id);
       CREATE TABLE IF NOT EXISTS pedigree_snapshots(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data TEXT NOT NULL);
-      PRAGMA user_version=4;`);
+      CREATE TABLE IF NOT EXISTS private_drafts(project_id TEXT NOT NULL, draft_key TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(project_id,draft_key));
+      CREATE INDEX IF NOT EXISTS runs_project ON runs(project_id);
+      CREATE INDEX IF NOT EXISTS jobs_project ON jobs(project_id);
+      PRAGMA user_version=5;`);
         // Seed scope only from the recorded question; never infer that the researcher reviewed it.
         for (const row of this.db.prepare("SELECT data FROM projects").all()) {
           const project = parse<Project>(row)!;
           this.markDerivedCardSources(project);
-          if (project.schemaVersion !== 4) {
-            project.schemaVersion = 4;
+          if (project.schemaVersion !== 5) {
+            project.schemaVersion = 5;
             this.db
               .prepare("UPDATE projects SET data=? WHERE id=?")
               .run(JSON.stringify(project), project.id);
@@ -753,7 +860,7 @@ export class ResearchStore {
   }
   saveProject(project: Project): void {
     const clean = validateProject(project);
-    clean.schemaVersion = 4;
+    clean.schemaVersion = 5;
     this.transaction(() => {
       this.syncCards(clean);
       for (const card of clean.cards) {
@@ -774,11 +881,35 @@ export class ResearchStore {
         }
       }
       const research = this.state(clean.id);
-      validatePedigreeReferences(this.pedigreeState(clean.id), {
+      const pedigree = this.pedigreeState(clean.id),
+        passages = this.allPassages(clean.id);
+      validatePedigreeReferences(pedigree, {
         ...research,
-        passages: this.allPassages(clean.id),
+        passages,
         reportIds: clean.outputs.map((output) => output.id),
       });
+      const deliveryContext = {
+        projectId: clean.id,
+        pedigree,
+        passages,
+        revisions: this.db
+          .prepare("SELECT data FROM pedigree_revisions WHERE project_id=?")
+          .all(clean.id)
+          .map((row) => parse<PedigreeRevision>(row)!),
+      };
+      for (const output of clean.outputs)
+        for (const record of [output, ...(output.revisions ?? [])]) {
+          if (record.deliveryPlan)
+            validateDeliveryPlanReferences(
+              record.deliveryPlan,
+              deliveryContext,
+            );
+          if (record.plan?.gapRefs?.length || record.plan?.findingRefs?.length)
+            validateDeliveryPlanReferences(
+              { ...record.plan, tasks: [] },
+              deliveryContext,
+            );
+        }
       for (const output of clean.outputs)
         for (const snapshotId of [
           output.pedigreeSnapshotId,
@@ -818,7 +949,7 @@ export class ResearchStore {
         this.saveBrief(createBrief(clean.id, clean.question));
     });
     // Assign generated references back to the caller, without changing annotations.
-    project.schemaVersion = 4;
+    project.schemaVersion = 5;
     project.cards = clean.cards;
   }
   getProject(id: string): Project | undefined {
@@ -1053,7 +1184,7 @@ export class ResearchStore {
           )
         : undefined;
     const position = project.cards.length;
-    next.schemaVersion = 4;
+    next.schemaVersion = 5;
     next.cards.push({
       id: cardId,
       kind: "note",
@@ -1330,17 +1461,348 @@ export class ResearchStore {
     if (!snapshot) throw new Error("Pedigree snapshot not found.");
     return snapshot;
   }
-  state(projectId: string): ResearchState {
+  /** Build the same complete immutable snapshot off the Electron event loop.
+   * A short SQLite read transaction freezes all rows together. Serialization and
+   * hashing then run in the worker; only the small proposal-validation context
+   * returns to the caller. Cancellation waits for worker termination before the
+   * service may close or restore the database. */
+  createPedigreeSnapshotAsync(
+    projectId: string,
+    options: { claimIds?: string[]; passageIds?: string[] } = {},
+    signal?: AbortSignal,
+  ): Promise<SnapshotAnalysisContext> {
+    checkId(projectId);
+    if (signal?.aborted)
+      return Promise.reject(new Error("Research job cancelled."));
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(
+        `
+        const {parentPort,workerData}=require('node:worker_threads');
+        const {DatabaseSync}=require('node:sqlite');
+        const {createHash,randomUUID}=require('node:crypto');
+        const cleanData=${cleanData.toString()};
+        const stableJSON=${stableJSON.toString()};
+        let db;
+        try {
+          db=new DatabaseSync(workerData.path);
+          db.exec('PRAGMA busy_timeout=5000; BEGIN');
+          const projectId=workerData.projectId;
+          if(!db.prepare('SELECT id FROM projects WHERE id=?').get(projectId))throw new Error('Investigation not found.');
+          const list=table=>db.prepare('SELECT data FROM '+table+' WHERE project_id=? ORDER BY rowid').all(projectId).map(row=>JSON.parse(row.data));
+          const sources=list('sources'),claims=list('claims'),tasks=list('tasks');
+          const state=Object.fromEntries(Object.entries(workerData.collections).map(([kind,key])=>[key,db.prepare('SELECT data FROM pedigree_entities WHERE project_id=? AND kind=? ORDER BY rowid').all(projectId,kind).map(row=>JSON.parse(row.data))]));
+          const passages=db.prepare('SELECT p.data FROM passages p JOIN sources s ON s.id=p.source_id WHERE s.project_id=? ORDER BY p.rowid').all(projectId).map(row=>JSON.parse(row.data));
+          const versions=db.prepare('SELECT v.data FROM versions v JOIN sources s ON s.id=v.source_id WHERE s.project_id=? ORDER BY s.rowid,v.rowid').all(projectId).map(row=>JSON.parse(row.data));
+          db.exec('COMMIT');
+          const claimIds=new Set(claims.map(c=>c.id)),passageIds=new Set(passages.map(p=>p.id));
+          for(const id of workerData.options.claimIds||[])if(!claimIds.has(id))throw new Error('Snapshot claim is outside this investigation.');
+          for(const id of workerData.options.passageIds||[])if(!passageIds.has(id))throw new Error('Snapshot passage is outside this investigation.');
+          const data=cleanData({schemaVersion:1,id:randomUUID(),projectId,createdAt:new Date().toISOString(),state,claims,tasks,passages,sources:sources.map(({assetId,...s})=>s),sourceVersions:versions.map(({assetId,snapshot,...v})=>v),sourceIds:sources.map(s=>s.id)});
+          const snapshot={...data,hash:createHash('sha256').update(stableJSON(data)).digest('hex')};
+          db.prepare('INSERT INTO pedigree_snapshots VALUES(?,?,?)').run(data.id,projectId,JSON.stringify(snapshot));
+          parentPort.postMessage({context:{id:data.id,state:data.state,claims:data.claims,tasks:data.tasks}});
+        } catch(error) { parentPort.postMessage({error:error.message}); }
+        finally {if(db)db.close();}
+      `,
+        {
+          eval: true,
+          workerData: {
+            path: this.databasePath,
+            projectId,
+            options,
+            collections: PEDIGREE_COLLECTIONS,
+          },
+        },
+      );
+      let result: SnapshotAnalysisContext | undefined,
+        failure: Error | undefined;
+      const abort = () => {
+        failure = new Error("Research job cancelled.");
+        void worker.terminate();
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      worker.on(
+        "message",
+        (message: { context?: SnapshotAnalysisContext; error?: string }) => {
+          if (message.error) failure = new Error(message.error);
+          else result = message.context;
+        },
+      );
+      worker.once("error", (error) => {
+        failure = error instanceof Error ? error : new Error(String(error));
+      });
+      worker.once("exit", (code) => {
+        signal?.removeEventListener("abort", abort);
+        if (failure) reject(failure);
+        else if (code !== 0 || !result)
+          reject(
+            new Error(
+              "The snapshot worker stopped before saving its complete result.",
+            ),
+          );
+        else resolve(result);
+      });
+      if (signal?.aborted) abort();
+    });
+  }
+  state(
+    projectId: string,
+    options: { lightweight?: boolean } = {},
+  ): ResearchState {
     const sources = this.list<SourceRecord>("sources", projectId);
+    const runPage = options.lightweight
+      ? this.listAnalysisRunsPage(projectId, { limit: 100 })
+      : undefined;
     return {
       sources,
-      versions: sources.flatMap((s) => this.versions(s.id)),
+      versions: sources
+        .flatMap((s) => this.versions(s.id))
+        .map((version) =>
+          options.lightweight
+            ? (({ snapshot: _snapshot, ...rest }) => rest)(version)
+            : version,
+        ),
       claims: this.list("claims", projectId),
       tasks: this.list("tasks", projectId),
       jobs: this.list("jobs", projectId),
       discoveries: this.list("discoveries", projectId),
-      runs: this.list("runs", projectId),
+      runs: runPage
+        ? runPage.items.slice().reverse()
+        : this.list("runs", projectId),
+      ...(runPage
+        ? {
+            runCount: runPage.total,
+            itemReviewBases: this.db
+              .prepare(
+                "SELECT DISTINCT r.id AS runId,json_extract(r.data,'$.itemInsight.question') AS question,json_extract(r.data,'$.itemInsight.briefRevision') AS briefRevision FROM claims c JOIN runs r ON r.id=json_extract(c.data,'$.itemReview.runId') WHERE c.project_id=? AND r.project_id=c.project_id AND json_type(r.data,'$.itemInsight')='object'",
+              )
+              .all(projectId)
+              .map((row) => ({
+                runId: String(row.runId),
+                question: String(row.question),
+                ...(row.briefRevision === null
+                  ? {}
+                  : { briefRevision: Number(row.briefRevision) }),
+              })),
+          }
+        : {}),
     };
+  }
+  researchDrafts(projectId: string): ResearchDraft[] {
+    checkId(projectId);
+    return this.db
+      .prepare(
+        "SELECT data FROM private_drafts WHERE project_id=? ORDER BY draft_key",
+      )
+      .all(projectId)
+      .map((row) => parse<ResearchDraft>(row)!);
+  }
+  saveResearchDraft(input: ResearchDraftInput): ResearchDraft {
+    checkId(input.projectId);
+    if (!this.getProject(input.projectId))
+      throw new Error("Draft investigation is unavailable.");
+    draftKey(input.key);
+    if (
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 0
+    )
+      throw new Error("Invalid expected draft revision.");
+    return this.transaction(() => {
+      const old = parse<ResearchDraft>(
+        this.db
+          .prepare(
+            "SELECT data FROM private_drafts WHERE project_id=? AND draft_key=?",
+          )
+          .get(input.projectId, input.key),
+      );
+      if ((old?.revision ?? 0) !== input.expectedRevision)
+        throw new Error(
+          "Private draft changed in another editor. Keep your writing and reload its saved revision before retrying.",
+        );
+      if (old && (old.kind !== input.kind || old.targetId !== input.targetId))
+        throw new Error("Private draft identity cannot be reassigned.");
+      const next = validateDraft(
+        { ...input, revision: input.expectedRevision + 1, updatedAt: now() },
+        input.projectId,
+      );
+      this.assertDraftTarget(next);
+      this.db
+        .prepare("INSERT OR REPLACE INTO private_drafts VALUES(?,?,?)")
+        .run(next.projectId, next.key, JSON.stringify(next));
+      return next;
+    });
+  }
+  deleteResearchDraft(
+    projectId: string,
+    key: string,
+    expectedRevision: number,
+  ): void {
+    checkId(projectId);
+    draftKey(key);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)
+      throw new Error("Invalid expected draft revision.");
+    const old = parse<ResearchDraft>(
+      this.db
+        .prepare(
+          "SELECT data FROM private_drafts WHERE project_id=? AND draft_key=?",
+        )
+        .get(projectId, key),
+    );
+    if (!old) return;
+    if (old.revision !== expectedRevision)
+      throw new Error(
+        "Private draft changed in another editor; its newer writing was preserved.",
+      );
+    this.db
+      .prepare("DELETE FROM private_drafts WHERE project_id=? AND draft_key=?")
+      .run(projectId, key);
+  }
+  private assertDraftTarget(draft: ResearchDraft): void {
+    if (!draft.targetId) return;
+    // Missing targets remain editable recovery buffers. Known foreign records
+    // cannot be used to attach a draft to another investigation.
+    for (const table of [
+      "sources",
+      "claims",
+      "tasks",
+      "runs",
+      "pedigree_entities",
+    ]) {
+      const owner = this.db
+        .prepare(`SELECT project_id FROM ${table} WHERE id=?`)
+        .get(draft.targetId) as { project_id: string } | undefined;
+      if (owner && owner.project_id !== draft.projectId)
+        throw new Error(
+          "Private draft target belongs to another investigation.",
+        );
+    }
+    const passage = this.db
+      .prepare(
+        "SELECT s.project_id FROM passages p JOIN sources s ON s.id=p.source_id WHERE p.id=?",
+      )
+      .get(draft.targetId) as { project_id: string } | undefined;
+    if (passage && passage.project_id !== draft.projectId)
+      throw new Error(
+        "Private draft passage belongs to another investigation.",
+      );
+    for (const row of this.db
+      .prepare("SELECT id,data FROM projects WHERE id<>?")
+      .all(draft.projectId))
+      if (
+        parse<Project>(row)!.outputs.some(
+          (output) => output.id === draft.targetId,
+        )
+      )
+        throw new Error(
+          "Private draft report belongs to another investigation.",
+        );
+  }
+  listSourcesPage(
+    projectId: string,
+    query = "",
+    page: PageRequest = {},
+  ): ResearchPage<SourceRecord> {
+    checkId(projectId);
+    if (typeof query !== "string" || query.length > 10000)
+      throw new Error("Invalid source query.");
+    const { offset, limit } = pageBounds(page),
+      args = [projectId, `%${query.replace(/[\\%_]/g, "\\$&")}%`];
+    const where =
+      "project_id=? AND COALESCE(json_extract(data,'$.derived'),0)=0 AND json_extract(data,'$.title') LIKE ? ESCAPE '\\'";
+    const total = Number(
+      (
+        this.db
+          .prepare(`SELECT count(*) AS n FROM sources WHERE ${where}`)
+          .get(...args) as { n: number }
+      ).n,
+    );
+    return {
+      items: this.db
+        .prepare(
+          `SELECT data FROM sources WHERE ${where} ORDER BY rowid LIMIT ? OFFSET ?`,
+        )
+        .all(...args, limit, offset)
+        .map((row) => parse<SourceRecord>(row)!),
+      total,
+      offset,
+      limit,
+    };
+  }
+  getSourcePassagesPage(
+    projectId: string,
+    sourceId: string,
+    versionId?: string,
+    query = "",
+    page: PageRequest = {},
+  ): ResearchPage<Passage> {
+    const source = this.getSourceRecord(sourceId);
+    if (source.projectId !== projectId)
+      throw new Error("Source belongs to another investigation.");
+    const version = this.getVersion(versionId ?? source.currentVersionId);
+    if (version.sourceId !== sourceId)
+      throw new Error("Source version belongs to another source.");
+    if (typeof query !== "string" || query.length > 10000)
+      throw new Error("Invalid passage query.");
+    const { offset, limit } = pageBounds(page),
+      args = [version.id, `%${query.replace(/[\\%_]/g, "\\$&")}%`];
+    const where =
+      "version_id=? AND json_extract(data,'$.text') LIKE ? ESCAPE '\\'";
+    const total = Number(
+      (
+        this.db
+          .prepare(`SELECT count(*) AS n FROM passages WHERE ${where}`)
+          .get(...args) as { n: number }
+      ).n,
+    );
+    return {
+      items: this.db
+        .prepare(
+          `SELECT data FROM passages WHERE ${where} ORDER BY rowid LIMIT ? OFFSET ?`,
+        )
+        .all(...args, limit, offset)
+        .map((row) => parse<Passage>(row)!),
+      total,
+      offset,
+      limit,
+    };
+  }
+  listAnalysisRunsPage(
+    projectId: string,
+    page: PageRequest = {},
+  ): ResearchPage<AnalysisRun> {
+    checkId(projectId);
+    const { offset, limit } = pageBounds(page);
+    const total = Number(
+      (
+        this.db
+          .prepare("SELECT count(*) AS n FROM runs WHERE project_id=?")
+          .get(projectId) as { n: number }
+      ).n,
+    );
+    const items = this.db
+      .prepare(
+        "SELECT json_remove(data,'$.requests','$.passages','$.retrieval','$.response','$.instructions','$.queries','$.quotationAssociations') AS data FROM runs WHERE project_id=? ORDER BY rowid DESC LIMIT ? OFFSET ?",
+      )
+      .all(projectId, limit, offset)
+      .map((row) => ({
+        ...parse<AnalysisRun>(row)!,
+        response: "",
+        instructions: "",
+        summaryOnly: true,
+      }));
+    return { items, total, offset, limit };
+  }
+  getAnalysisRun(projectId: string, id: string): AnalysisRun {
+    checkId(projectId);
+    checkId(id);
+    const run = parse<AnalysisRun>(
+      this.db
+        .prepare("SELECT data FROM runs WHERE id=? AND project_id=?")
+        .get(id, projectId),
+    );
+    if (!run)
+      throw new Error("Analysis run is unavailable in this investigation.");
+    return run;
   }
   saveSource(source: SourceRecord) {
     checkId(source.id);
@@ -1449,9 +1911,11 @@ export class ResearchStore {
     });
   }
   addPassage(passage: Passage) {
-    if (this.getVersion(passage.versionId).status !== "processing")
-      throw new Error("Completed source passages are immutable.");
-    this.insertPassage(passage);
+    this.transaction(() => {
+      if (this.getVersion(passage.versionId).status !== "processing")
+        throw new Error("Completed source passages are immutable.");
+      this.insertPassage(passage);
+    });
   }
   private insertPassage(passage: Passage) {
     checkId(passage.id);
@@ -1492,7 +1956,10 @@ export class ResearchStore {
   updateVersionMetadata(
     id: string,
     patch: Partial<
-      Pick<SourceVersion, "title" | "author" | "publisher" | "publishedAt">
+      Pick<
+        SourceVersion,
+        "title" | "author" | "publisher" | "publishedAt" | "doi"
+      >
     >,
   ) {
     const version = this.getVersion(id);
@@ -1503,6 +1970,7 @@ export class ResearchStore {
       author: patch.author ?? version.author,
       publisher: patch.publisher ?? version.publisher,
       publishedAt: patch.publishedAt ?? version.publishedAt,
+      doi: patch.doi ?? version.doi,
     };
     this.db
       .prepare("UPDATE versions SET data=? WHERE id=?")
@@ -1557,6 +2025,30 @@ export class ResearchStore {
       )
       .map((row) => parse<Passage>(row)!);
   }
+  retrievalPassagePage(
+    projectId: string,
+    afterRowid = 0,
+  ): PassagePolicyEntry[] {
+    checkId(projectId);
+    return this.db
+      .prepare(
+        "SELECT p.rowid,p.id,p.source_id AS sourceId,p.version_id AS versionId,json_extract(p.data,'$.method') AS method,json_extract(p.data,'$.inclusion') AS inclusion,length(trim(json_extract(p.data,'$.text'))) > 0 AS hasText FROM passages p JOIN sources s ON s.id=p.source_id WHERE s.project_id=? AND p.rowid>? AND COALESCE(json_extract(s.data,'$.derived'),0)=0 AND p.version_id=json_extract(s.data,'$.currentVersionId') ORDER BY p.rowid LIMIT 2000",
+      )
+      .all(projectId, afterRowid)
+      .map(
+        (row) =>
+          ({ ...row, hasText: Boolean(row.hasText) }) as PassagePolicyEntry,
+      );
+  }
+  pinnedPassages(projectId: string): Passage[] {
+    checkId(projectId);
+    return this.db
+      .prepare(
+        "SELECT p.data FROM passages p JOIN sources s ON s.id=p.source_id WHERE s.project_id=? AND COALESCE(json_extract(s.data,'$.derived'),0)=0 AND p.version_id=json_extract(s.data,'$.currentVersionId') AND (json_extract(s.data,'$.inclusion')='pin' OR json_extract(p.data,'$.inclusion')='pin') ORDER BY p.rowid",
+      )
+      .all(projectId)
+      .map((row) => parse<Passage>(row)!);
+  }
   search(projectId: string, query: string, limit = 50): SearchHit[] {
     const terms = [...new Set(query.match(/[\p{L}\p{N}_-]+/gu) ?? [])]
       .slice(0, 50)
@@ -1586,6 +2078,154 @@ export class ResearchStore {
       sourceTitle: (JSON.parse(row.source) as SourceRecord).title,
       score: row.score,
     }));
+  }
+  /** Candidate lanes are independent of pins; pinned material has its own pool. */
+  searchCandidatesBatchAsync(
+    projectId: string,
+    queries: string[],
+    signal?: AbortSignal,
+    includePinned = true,
+  ): Promise<Passage[][]> {
+    checkId(projectId);
+    if (
+      queries.length > 30 ||
+      queries.some((q) => typeof q !== "string" || q.length > 10000)
+    )
+      throw new Error("Invalid retrieval queries.");
+    if (signal?.aborted)
+      return Promise.reject(new Error("Research job cancelled."));
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(
+        `
+        const {parentPort,workerData}=require('node:worker_threads');
+        const {DatabaseSync}=require('node:sqlite');
+        let db;
+        try {
+          db=new DatabaseSync(workerData.path,{readOnly:true});db.exec('PRAGMA busy_timeout=5000; BEGIN');
+          const results=workerData.queries.map(query=>{
+            const terms=[...new Set(query.match(/[\\p{L}\\p{N}_-]+/gu)||[])].slice(0,50).filter(term=>term.length>1);
+            const expression=terms.map(term=>'"'+term.replace(/"/g,'""')+'"').join(' OR ');
+            const from=expression?'passage_fts JOIN passages p ON p.id=passage_fts.id JOIN sources s ON s.id=p.source_id':'passages p JOIN sources s ON s.id=p.source_id';
+            const where=(expression?'passage_fts MATCH ? AND ':'')+"s.project_id=? AND COALESCE(json_extract(s.data,'$.derived'),0)=0 AND json_extract(s.data,'$.inclusion')<>'exclude' AND json_extract(p.data,'$.inclusion')<>'exclude' AND p.version_id=json_extract(s.data,'$.currentVersionId')";
+            const args=expression?[expression,workerData.projectId]:[workerData.projectId];
+            const ranked=pin=>db.prepare('SELECT p.data FROM '+from+' WHERE '+where+' AND '+(pin?"(json_extract(s.data,'$.inclusion')='pin' OR json_extract(p.data,'$.inclusion')='pin')":"json_extract(s.data,'$.inclusion')<>'pin' AND json_extract(p.data,'$.inclusion')<>'pin'")+' ORDER BY '+(expression?'bm25(passage_fts),':'')+'p.rowid LIMIT 40').all(...args).map(row=>JSON.parse(row.data));
+            const unpinned=ranked(false),pinned=workerData.includePinned?ranked(true):[];
+            return Array.from({length:Math.max(unpinned.length,pinned.length)},(_,i)=>[unpinned[i],pinned[i]].filter(Boolean)).flat();
+          });
+          db.exec('COMMIT');parentPort.postMessage({results});
+        }catch(error){parentPort.postMessage({error:error.message});}finally{if(db)db.close();}
+      `,
+        {
+          eval: true,
+          workerData: {
+            path: this.databasePath,
+            projectId,
+            queries,
+            includePinned,
+          },
+        },
+      );
+      let result: Passage[][] | undefined, failure: Error | undefined;
+      const abort = () => {
+        failure = new Error("Research job cancelled.");
+        void worker.terminate();
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      worker.on(
+        "message",
+        (value: { results?: Passage[][]; error?: string }) => {
+          if (value.error) failure = new Error(value.error);
+          else result = value.results;
+        },
+      );
+      worker.once("error", (error) => {
+        failure = error instanceof Error ? error : new Error(String(error));
+      });
+      worker.once("exit", (code) => {
+        signal?.removeEventListener("abort", abort);
+        if (failure) reject(failure);
+        else if (code !== 0 || !result)
+          reject(
+            new Error("Evidence search worker stopped before completion."),
+          );
+        else resolve(result);
+      });
+      if (signal?.aborted) abort();
+    });
+  }
+  searchCandidates(projectId: string, query: string, limit = 40): SearchHit[] {
+    const unpinned = this.searchSourcesPage(
+      projectId,
+      query,
+      { limit },
+      true,
+      false,
+    ).items;
+    const pinned = this.searchSourcesPage(
+      projectId,
+      query,
+      { limit },
+      "only",
+      false,
+    ).items;
+    return Array.from(
+      { length: Math.max(unpinned.length, pinned.length) },
+      (_, index) =>
+        [unpinned[index], pinned[index]].filter((entry): entry is SearchHit =>
+          Boolean(entry),
+        ),
+    ).flat();
+  }
+  searchSourcesPage(
+    projectId: string,
+    query: string,
+    page: PageRequest = {},
+    excludePins: boolean | "only" = false,
+    countResults = true,
+  ): ResearchPage<SearchHit> {
+    checkId(projectId);
+    if (typeof query !== "string" || query.length > 10000)
+      throw new Error("Invalid research query.");
+    const { offset, limit } = pageBounds(page);
+    const terms = [...new Set(query.match(/[\p{L}\p{N}_-]+/gu) ?? [])]
+      .slice(0, 50)
+      .filter((term) => term.length > 1);
+    const expression = terms
+      .map((term) => '"' + term.replace(/"/g, '""') + '"')
+      .join(" OR ");
+    const from = expression
+      ? "passage_fts JOIN passages p ON p.id=passage_fts.id JOIN sources s ON s.id=p.source_id"
+      : "passages p JOIN sources s ON s.id=p.source_id";
+    const where = `${expression ? "passage_fts MATCH ? AND " : ""}s.project_id=? AND COALESCE(json_extract(s.data,'$.derived'),0)=0 AND json_extract(s.data,'$.inclusion')<>'exclude' AND json_extract(p.data,'$.inclusion')<>'exclude' AND p.version_id=json_extract(s.data,'$.currentVersionId')${excludePins === "only" ? " AND (json_extract(s.data,'$.inclusion')='pin' OR json_extract(p.data,'$.inclusion')='pin')" : excludePins ? " AND json_extract(s.data,'$.inclusion')<>'pin' AND json_extract(p.data,'$.inclusion')<>'pin'" : ""}`;
+    const args = expression ? [expression, projectId] : [projectId];
+    const total = countResults
+      ? Number(
+          (
+            this.db
+              .prepare(`SELECT count(*) AS n FROM ${from} WHERE ${where}`)
+              .get(...args) as { n: number }
+          ).n,
+        )
+      : 0;
+    const rows = this.db
+      .prepare(
+        `SELECT p.data,s.data AS source,${expression ? "bm25(passage_fts)" : "0"} AS score FROM ${from} WHERE ${where} ORDER BY score,p.rowid LIMIT ? OFFSET ?`,
+      )
+      .all(...args, limit, offset) as {
+      data: string;
+      source: string;
+      score: number;
+    }[];
+    return {
+      items: rows.map((row) => ({
+        ...JSON.parse(row.data),
+        sourceTitle: (JSON.parse(row.source) as SourceRecord).title,
+        score: row.score,
+      })),
+      total,
+      offset,
+      limit,
+    };
   }
   syncCards(project: Project) {
     this.markDerivedCardSources(project);
@@ -1973,7 +2613,8 @@ export class ResearchStore {
       .map((row) => parse<Passage>(row)!);
     return cleanData({
       ...state,
-      schemaVersion: 4,
+      schemaVersion: 5,
+      drafts: this.researchDrafts(projectId),
       pedigree: this.pedigreeState(projectId),
       pedigreeRevisions: this.db
         .prepare(
@@ -2048,6 +2689,7 @@ export class ResearchStore {
           "pedigree_entities",
           "pedigree_revisions",
           "pedigree_snapshots",
+          "private_drafts",
         ])
           this.db
             .prepare(`DELETE FROM ${table} WHERE project_id=?`)
@@ -2146,6 +2788,23 @@ export class ResearchStore {
       // The archive was validated as a whole before writing. Gap references can
       // now resolve against the imported assumptions and methods in this transaction.
       for (const task of data.tasks) this.saveTask(task);
+      for (const draft of data.drafts ?? []) {
+        this.assertDraftTarget(draft);
+        const existing = parse<ResearchDraft>(
+          this.db
+            .prepare(
+              "SELECT data FROM private_drafts WHERE project_id=? AND draft_key=?",
+            )
+            .get(projectId, draft.key),
+        );
+        if (existing && stableJSON(existing) !== stableJSON(draft))
+          throw new Error(
+            "Conflicting private draft; existing writing was preserved.",
+          );
+        this.db
+          .prepare("INSERT OR REPLACE INTO private_drafts VALUES(?,?,?)")
+          .run(projectId, draft.key, JSON.stringify(draft));
+      }
       validatePedigreeState(this.pedigreeState(projectId), projectId);
     });
   }
@@ -2164,7 +2823,8 @@ export function validateResearchArchive(
   if (
     raw.schemaVersion !== 2 &&
     raw.schemaVersion !== 3 &&
-    raw.schemaVersion !== 4
+    raw.schemaVersion !== 4 &&
+    raw.schemaVersion !== 5
   )
     throw new Error("Unsupported research archive version.");
   const arr = (key: string, max = 100_000): Record<string, unknown>[] => {
@@ -2247,6 +2907,7 @@ export function validateResearchArchive(
     author: optional(v.author),
     publisher: optional(v.publisher),
     publishedAt: optional(v.publishedAt),
+    doi: optional(v.doi),
     url: url(v.url),
     status: choice(v.status, [
       "queued",
@@ -2643,7 +3304,11 @@ export function validateResearchArchive(
   let pedigree = emptyPedigreeState();
   let pedigreeRevisions: PedigreeRevision[] = [];
   let pedigreeSnapshots: PedigreeSnapshot[] = [];
-  if (raw.schemaVersion === 3 || raw.schemaVersion === 4) {
+  if (
+    raw.schemaVersion === 3 ||
+    raw.schemaVersion === 4 ||
+    raw.schemaVersion === 5
+  ) {
     const state = raw.pedigree as Record<string, unknown> | undefined;
     if (!state || typeof state !== "object")
       throw new Error("Version 3 archive is missing pedigree records.");
@@ -2778,7 +3443,7 @@ export function validateResearchArchive(
   }
   for (const card of projectCards ?? []) {
     if (!card.boardReference) continue;
-    if (raw.schemaVersion !== 4)
+    if (raw.schemaVersion < 4)
       throw new Error("Linked research board items require archive version 4.");
     const ref = validateBoardReference(card.boardReference);
     if (
@@ -2814,6 +3479,14 @@ export function validateResearchArchive(
         "Board reference does not match its saved research record type.",
       );
   }
+  const drafts =
+    raw.drafts === undefined
+      ? []
+      : arr("drafts", 10000).map((draft) => validateDraft(draft, projectId));
+  if (drafts.length && raw.schemaVersion !== 5)
+    throw new Error("Private draft buffers require archive version 5.");
+  if (new Set(drafts.map((draft) => draft.key)).size !== drafts.length)
+    throw new Error("Duplicate private draft keys.");
   return {
     schemaVersion: raw.schemaVersion,
     sources,
@@ -2827,5 +3500,6 @@ export function validateResearchArchive(
     pedigree,
     pedigreeRevisions,
     pedigreeSnapshots,
+    ...(raw.schemaVersion === 5 ? { drafts } : {}),
   };
 }

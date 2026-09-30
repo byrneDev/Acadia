@@ -22,6 +22,10 @@ import {
   reconcileSavedDraft,
   usePedigreeDraft,
 } from "../src/renderer/components/pedigree-ui";
+import {
+  flushDrafts,
+  hydrateDrafts,
+} from "../src/renderer/components/durableDrafts";
 import type { ResearchState } from "../src/shared/research";
 import type { MethodAssistanceProposal } from "../src/shared/pedigree-analysis";
 
@@ -30,6 +34,21 @@ const mountedForms = new Set<() => void>();
 afterEach(() => {
   for (const unmount of mountedForms) unmount();
 });
+
+async function prepareDraftStore() {
+  Object.assign(window, {
+    acadia: {
+      researchDrafts: async () => [],
+      saveResearchDraft: async (input: { expectedRevision: number }) => ({
+        ...input,
+        revision: input.expectedRevision + 1,
+        updatedAt: new Date().toISOString(),
+      }),
+      deleteResearchDraft: async () => {},
+    },
+  });
+  await hydrateDrafts("p");
+}
 
 function mountBriefDraft(key: string, initial: ResearchBrief) {
   const container = document.createElement("div");
@@ -52,6 +71,10 @@ function mountBriefDraft(key: string, initial: ResearchBrief) {
       return draft;
     },
     container,
+    rerender(next: ResearchBrief) {
+      initial = next;
+      act(() => root.render(createElement(Form)));
+    },
     unmount,
   };
 }
@@ -175,9 +198,107 @@ describe("source origin display", () => {
 });
 
 describe("research form saves", () => {
+  it("saves a new review issue draft without sending its composite routing key as a record ID", async () => {
+    await prepareDraftStore();
+    const writes = vi.fn(
+      async (input: { expectedRevision: number; targetId?: string }) => {
+        if (input.targetId?.includes(":")) throw new Error("Invalid record ID");
+        return {
+          ...input,
+          revision: input.expectedRevision + 1,
+          updatedAt: new Date().toISOString(),
+        };
+      },
+    );
+    Object.assign(window.acadia!, { saveResearchDraft: writes });
+    const initial = createBrief("p");
+    const form = mountBriefDraft(`issue:p:finding:${initial.id}:new`, initial);
+    act(() =>
+      form.draft.edit({
+        ...initial,
+        scope: "Preserve this unaccepted review issue",
+      }),
+    );
+    await act(async () => {
+      await form.draft.flush();
+    });
+    expect(writes).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "review-issue", targetId: undefined }),
+    );
+    expect(form.draft.error).toBe("");
+    await act(async () => {
+      await form.draft.discard();
+    });
+  });
+  it("retains and re-saves typing that arrives while the previous private draft is being cleared", async () => {
+    const initial = { ...createBrief("p"), revision: 1 };
+    await prepareDraftStore();
+    let releaseDelete!: () => void;
+    const deleting = new Promise<void>((resolve) => {
+      releaseDelete = resolve;
+    });
+    const remove = vi.fn().mockReturnValue(deleting);
+    const writes = vi.fn(
+      async (input: { expectedRevision: number; value: unknown }) => ({
+        ...input,
+        revision: input.expectedRevision + 1,
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+    Object.assign(window.acadia!, {
+      deleteResearchDraft: remove,
+      saveResearchDraft: writes,
+    });
+    const form = mountBriefDraft(`brief:p:${initial.id}`, initial);
+    act(() => form.draft.edit({ ...initial, scope: "Submitted" }));
+    let pending!: Promise<ResearchBrief>;
+    await act(async () => {
+      pending = form.draft.persist(async (value) => ({
+        ...value,
+        revision: 2,
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(remove).toHaveBeenCalledOnce();
+    act(() =>
+      form.draft.edit({ ...form.draft.value, scope: "Typing during clear" }),
+    );
+    let flushed = false;
+    const closing = flushDrafts("p").then(() => {
+      flushed = true;
+    });
+    expect(flushed).toBe(false);
+    await act(async () => {
+      releaseDelete();
+      await pending;
+      await closing;
+    });
+    expect(form.draft.value).toMatchObject({
+      revision: 2,
+      scope: "Typing during clear",
+    });
+    expect(form.draft.dirty).toBe(true);
+    expect(writes.mock.calls.at(-1)?.[0]).toMatchObject({
+      expectedRevision: 0,
+      value: { buffer: { revision: 2, scope: "Typing during clear" } },
+    });
+    expect(flushed).toBe(true);
+    form.rerender({ ...initial, revision: 2, scope: "Submitted" });
+    await act(async () => {
+      await flushDrafts("p");
+    });
+    expect(writes.mock.calls.at(-1)?.[0]).toMatchObject({
+      value: {
+        baseSignature: `${initial.id}:2`,
+        buffer: { scope: "Typing during clear" },
+      },
+    });
+    expect(form.draft.conflict).toBe(false);
+  });
   it("delivers a pending save to the remounted form without losing newer typing or resubmitting a stale revision", async () => {
     const initial = { ...createBrief("p"), revision: 1 };
-    const key = `delayed-save:${initial.id}`;
+    const key = `brief:p:${initial.id}`;
+    await prepareDraftStore();
     const first = mountBriefDraft(key, initial);
     act(() => first.draft.edit({ ...initial, scope: "Submitted scope" }));
     const submitted = first.draft.value;
@@ -236,7 +357,8 @@ describe("research form saves", () => {
 
   it("keeps a remounted draft editable and retryable after its pending save fails", async () => {
     const initial = { ...createBrief("p"), revision: 1 };
-    const key = `failed-save:${initial.id}`;
+    const key = `brief:p:${initial.id}`;
+    await prepareDraftStore();
     const first = mountBriefDraft(key, initial);
     act(() => first.draft.edit({ ...initial, scope: "Keep this scope" }));
     let rejectSave!: (error: Error) => void;
