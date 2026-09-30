@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -24,13 +25,19 @@ import {
 import type { ResearchJob } from "../src/shared/research";
 import type { ItemInsight } from "../src/shared/item-insight";
 
-const fixtures: { store: ResearchStore; path: string }[] = [];
+const openStores = new Set<ResearchStore>();
+const fixturePaths = new Set<string>();
+function closeStore(store: ResearchStore) {
+  store.close();
+  openStores.delete(store);
+}
 const timestamp = "2026-09-29T12:00:00.000Z";
 function fixture() {
   const path = mkdtempSync(join(tmpdir(), "acadia-board-")),
     store = new ResearchStore(path),
     project = createBlankProject();
-  fixtures.push({ store, path });
+  openStores.add(store);
+  fixturePaths.add(path);
   project.question = "Does Cedar need another trial?";
   project.privacy = {
     mode: "local",
@@ -70,14 +77,15 @@ function fixture() {
   );
   return { path, store, project, source, service };
 }
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals();
-  for (const { store, path } of fixtures.splice(0)) {
-    try {
-      store.close();
-    } catch {}
-    rmSync(path, { recursive: true, force: true });
-  }
+  // Migration reopens the same directory. Close every live connection before
+  // deleting any root: Windows cannot unlink an open SQLite database.
+  for (const store of openStores) closeStore(store);
+  await Promise.all(
+    [...fixturePaths].map((path) => rm(path, { recursive: true, force: true })),
+  );
+  fixturePaths.clear();
 });
 async function finish(store: ResearchStore, job: ResearchJob) {
   for (let i = 0; i < 200; i++) {
@@ -485,28 +493,34 @@ describe("canonical research-to-delivery board references", () => {
     const legacy = structuredClone(project);
     legacy.schemaVersion = 3;
     legacy.cards[0].methodId = method.id;
-    store.close();
+    closeStore(store);
     const db = new DatabaseSync(join(path, "research.sqlite"));
-    db.prepare("UPDATE projects SET data=? WHERE id=?").run(
-      JSON.stringify(legacy),
-      legacy.id,
-    );
-    db.prepare("UPDATE pedigree_snapshots SET data=? WHERE id=?").run(
-      JSON.stringify(snapshot),
-      snapshot.id,
-    );
-    db.exec("PRAGMA user_version=3; PRAGMA wal_checkpoint(TRUNCATE);");
-    db.close();
+    try {
+      db.prepare("UPDATE projects SET data=? WHERE id=?").run(
+        JSON.stringify(legacy),
+        legacy.id,
+      );
+      db.prepare("UPDATE pedigree_snapshots SET data=? WHERE id=?").run(
+        JSON.stringify(snapshot),
+        snapshot.id,
+      );
+      db.exec("PRAGMA user_version=3; PRAGMA wal_checkpoint(TRUNCATE);");
+    } finally {
+      db.close();
+    }
     const migrated = new ResearchStore(path);
-    fixtures.push({ store: migrated, path });
+    openStores.add(migrated);
     expect(migrated.migrationBackupPath).toContain("to-v4");
     const backup = new DatabaseSync(migrated.migrationBackupPath!, {
       readOnly: true,
     });
-    expect(
-      (backup.prepare("PRAGMA user_version").get() as any).user_version,
-    ).toBe(3);
-    backup.close();
+    try {
+      expect(
+        (backup.prepare("PRAGMA user_version").get() as any).user_version,
+      ).toBe(3);
+    } finally {
+      backup.close();
+    }
     expect(migrated.getProject(project.id)?.schemaVersion).toBe(4);
     expect(migrated.getSource(source.source.id).source).toMatchObject({
       derived: true,
