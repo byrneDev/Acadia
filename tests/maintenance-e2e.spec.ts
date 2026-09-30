@@ -1,14 +1,36 @@
-import { _electron as electron, test, expect } from "@playwright/test";
+import {
+  _electron as electron,
+  test,
+  expect,
+  type ElectronApplication,
+} from "@playwright/test";
 import { createRequire } from "node:module";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import AdmZip from "adm-zip";
 import { createServer } from "node:http";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 const root = resolve(process.cwd());
 const executable = createRequire(join(root, "package.json"))(
   "electron",
 ) as string;
+async function forceTerminateOwned(app: ElectronApplication) {
+  const child = app.process();
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32") {
+    if (!child.pid) throw new Error("Fixture process has no owned PID.");
+    // Windows does not reap the Chromium helper tree on parent SIGKILL.
+    await promisify(execFile)(
+      "taskkill.exe",
+      ["/PID", String(child.pid), "/T", "/F"],
+      { timeout: 15_000 },
+    );
+  } else if (!child.kill("SIGKILL")) {
+    throw new Error("Could not terminate the isolated fixture process.");
+  }
+}
 async function launch(existingDirectory?: string) {
   const directory =
     existingDirectory ??
@@ -36,16 +58,25 @@ async function launch(existingDirectory?: string) {
 }
 test("forced process termination preserves committed work and private drafts without resuming model requests", async () => {
   let requests = 0;
+  const serverErrors: unknown[] = [];
   const server = createServer(async (request) => {
-    for await (const _ of request) {
+    try {
+      for await (const _ of request) {
+      }
+      requests++;
+    } catch (error) {
+      // An intentionally killed client can abort its fixture request stream.
+      if ((error as NodeJS.ErrnoException).code !== "ECONNRESET")
+        serverErrors.push(error);
     }
-    requests++;
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string")
     throw new Error("Fixture server missing");
   const first = await launch();
+  let terminated = false;
+  let terminationAttempted = false;
   let restarted: Awaited<ReturnType<typeof launch>> | undefined;
   try {
     const projectId = await first.page.evaluate(async (port) => {
@@ -86,9 +117,19 @@ test("forced process termination preserves committed work and private drafts wit
       return project.id;
     }, address.port);
     await expect.poll(() => requests).toBe(1);
-    const closed = first.app.waitForEvent("close");
-    first.app.process().kill("SIGKILL");
-    await closed;
+    await test.step(
+      "force terminate the owned Electron process tree",
+      async () => {
+        const closed = first.app.waitForEvent("close", { timeout: 15_000 });
+        // Keep a rejected close event handled if the kill command itself fails.
+        void closed.catch(() => undefined);
+        terminationAttempted = true;
+        await forceTerminateOwned(first.app);
+        terminated = true;
+        await closed;
+      },
+      { timeout: 20_000 },
+    );
     restarted = await launch(first.directory);
     const restored = await restarted.page.evaluate(
       async (id) => ({
@@ -111,10 +152,14 @@ test("forced process termination preserves committed work and private drafts wit
       true,
     );
     expect(requests).toBe(1);
+    expect(serverErrors).toEqual([]);
   } finally {
-    if (restarted) await restarted.app.close();
-    else await first.app.close().catch(() => undefined);
     server.closeAllConnections();
+    if (restarted) await restarted.app.close();
+    else if (!terminationAttempted)
+      await first.app.close().catch(() => undefined);
+    else if (!terminated)
+      await forceTerminateOwned(first.app).catch(() => undefined);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(first.directory, { recursive: true, force: true });
   }
